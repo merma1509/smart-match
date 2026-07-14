@@ -1,0 +1,39 @@
+# Default configuration for all settings
+app:
+  name: Smart Match
+  version: 0.1.0
+
+api:
+  hosts: 0.0.0.0
+  port: 8000
+
+paths:
+  input_dir: data/input
+  output_dir: data/output
+
+ocr:
+  handwritten_model: taiga75/ru-trocr-1700s
+  printed_model: taiga75/ru-trocr-1700s
+  tesseract_lang: rus
+  confidence_threshold: 0.7
+
+preprocessing:
+  max_image_dimension: 4000
+  default_threshold_method: adaptive
+
+language:
+  default: ru
+
+logging:
+  level: INFO
+  rotation: 10 MB
+  retention: 7 days
+
+file_upload:
+  max_size_mb: 10
+  allowed_extensions:
+    - .jpg
+    - .jpeg
+    - .png
+    - .tiff
+    - .bmp

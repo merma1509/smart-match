@@ -1,0 +1,5 @@
+# Production overrides
+ocr:
+  confidence_threshold: 0.7
+logging:
+  level: WARNING

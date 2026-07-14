@@ -1,0 +1,5 @@
+# Development Overrides
+ocr:
+  confidence_threshold: 0.5 # Lower threshold for testing
+logging:
+  level: DEBUG
