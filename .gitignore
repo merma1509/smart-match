@@ -3,3 +3,13 @@ models/
 __pycache__/
 *.pt
 *.pkl
+
+# Temporary files
+results/*.json
+uploads/*.jpg
+data/cache/
+diagnosis/
+training_data/
+__pycache__/
+*.pyc
+.DS_Store

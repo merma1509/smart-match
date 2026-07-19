@@ -149,7 +149,118 @@ class LayoutDetector:
             "num_rows": len(rows),
             "num_cols": len(cols),
         }
-
+    
+    def detect_table_robust(self, image: np.ndarray, gray_raw: np.ndarray = None) -> dict:
+        """ROBUST table detection — works on original image or raw grayscale.
+        
+        Uses multiple strategies and picks the best result:
+        1. Try morphological on raw gray (if available)
+        2. Try HSV color filtering (tables often have printed blue/purple headers)
+        3. Try adaptive thresholding
+        4. Fallback: treat whole page as one big table with 2 columns
+        
+        Returns unified table_info dict.
+        """
+        # Strategy 1: Use raw gray if available
+        if gray_raw is not None:
+            result = self.detect_table_boundaries_from_raw(gray_raw)
+            if result["num_rows"] >= 2 and result["num_cols"] >= 2:
+                logger.info(f"Table found via raw Otsu: {result['num_rows']}r x {result['num_cols']}c")
+                return result
+        
+        # Strategy 2: Try on preprocessed gray
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image
+        
+        # Try with different Canny thresholds
+        for low, high in [(20, 80), (30, 100), (50, 150)]:
+            edges = cv2.Canny(gray, low, high)
+            
+            # Horizontal lines
+            h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
+            h_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, h_kernel)
+            h_proj = np.sum(h_lines > 0, axis=1).astype(float)
+            h_proj = h_proj / max(np.max(h_proj), 1)
+            
+            # Vertical lines
+            v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
+            v_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, v_kernel)
+            v_proj = np.sum(v_lines > 0, axis=0).astype(float)
+            v_proj = v_proj / max(np.max(v_proj), 1)
+            
+            # Detect rows and columns with lower thresholds
+            rows = self._projection_to_segments(h_proj, threshold=0.05, min_length=10)
+            cols = self._projection_to_segments(v_proj, threshold=0.03, min_length=20)
+            
+            if len(rows) >= 2 and len(cols) >= 2:
+                logger.info(f"Table found via Canny({low},{high}): {len(rows)}r x {len(cols)}c")
+                return {"rows": rows, "columns": cols, "num_rows": len(rows), "num_cols": len(cols)}
+        
+        # Strategy 3: Force table detection — split page into logical regions
+        h, w = gray.shape
+        
+        # Use projection profiles to find text lines (NOT table lines)
+        # In metrical books, text is organized in columns even without visible lines
+        bin_inv = cv2.bitwise_not(gray)
+        _, binary = cv2.threshold(bin_inv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Horizontal projection of text
+        h_proj = np.sum(binary > 0, axis=1).astype(float)
+        h_proj = h_proj / max(np.max(h_proj), 1)
+        
+        # Find rows where text exists
+        text_rows = []
+        in_row = False
+        start = 0
+        for i in range(len(h_proj)):
+            if h_proj[i] > 0.005 and not in_row:  # Very low threshold
+                start = i
+                in_row = True
+            elif h_proj[i] <= 0.005 and in_row:
+                if i - start > 5:  # At least 5px tall
+                    text_rows.append((start, i))
+                in_row = False
+        if in_row and len(h_proj) - start > 5:
+            text_rows.append((start, len(h_proj)))
+        
+        # Also try to find column-like structures via vertical projection
+        v_proj = np.sum(binary > 0, axis=0).astype(float)
+        v_proj = v_proj / max(np.max(v_proj), 1)
+        
+        text_cols = []
+        in_col = False
+        start = 0
+        for i in range(len(v_proj)):
+            if v_proj[i] > 0.003 and not in_col:
+                start = i
+                in_col = True
+            elif v_proj[i] <= 0.003 and in_col:
+                if i - start > 30:  # At least 30px wide
+                    text_cols.append((start, i))
+                in_col = False
+        if in_col and len(v_proj) - start > 30:
+            text_cols.append((start, len(v_proj)))
+        
+        if len(text_rows) >= 3 and len(text_cols) >= 1:
+            logger.info(f"Table forced via text projection: {len(text_rows)}r x {len(text_cols)}c")
+            return {
+                "rows": text_rows,
+                "columns": text_cols if len(text_cols) >= 2 else [(0, w)],
+                "num_rows": len(text_rows),
+                "num_cols": max(len(text_cols), 1),
+            }
+        
+        # Strategy 4: Ultimate fallback — treat as single-column table
+        logger.info("No table found, using page as single region")
+        return {
+            "rows": text_rows if len(text_rows) >= 2 else [(0, h)],
+            "columns": [(0, w)],
+            "num_rows": max(len(text_rows), 1),
+            "num_cols": 1,
+        }
+    
     def _projection_to_segments(self, proj: np.ndarray, threshold: float, min_length: int) -> list:
         """Convert projection profile to list of (start, end) segments."""
         segments = []
@@ -204,45 +315,33 @@ class LayoutDetector:
 
     # ── 2. Table Page Detection ──
     def _is_table_page(self, gray: np.ndarray, table_info: dict) -> bool:
-        """Determine if the page contains a table structure.
-
-        Returns True if the page has a proper table grid with multiple rows/columns.
-        Returns False for title pages, paragraph text, blank pages, etc.
-        """
+        """Relaxed table page detection for metrical books."""
         h, w = gray.shape
-
-        # 1. Check row/column count
-        if table_info["num_rows"] < 2 or table_info["num_cols"] < 2:
+        
+        # 1. Check row/column count — relaxed
+        if table_info["num_rows"] < 2:
             return False
-
-        # 2. Check if rows cover a significant portion of the page
+        
+        # 2. Check if rows cover a significant portion — relaxed to 20%
         rows = table_info["rows"]
         total_row_area = sum(y2 - y1 for y1, y2 in rows)
         row_coverage = total_row_area / h if h > 0 else 0
-        if row_coverage < 0.3:  # Rows cover less than 30% of page height
+        if row_coverage < 0.2:
             return False
-
-        # 3. Check line density — tables have many horizontal and vertical lines
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-        kern_h = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
-        h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kern_h)
-        h_density = np.sum(h_lines > 0) / (h * w)
-
-        kern_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
-        v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kern_v)
-        v_density = np.sum(v_lines > 0) / (h * w)
-
-        # Tables have both horizontal AND vertical lines
-        if h_density < 0.005 or v_density < 0.001:
-            return False
-
-        # 4. Check cell density — tables divide the page into many small regions
-        if table_info["num_rows"] >= 3 and table_info["num_cols"] >= 3:
+        
+        # 3. Line density check — only if we have enough rows
+        if table_info["num_rows"] >= 3 and table_info["num_cols"] >= 1:
             return True
-
-        # 5. Default: if we have reasonable rows + columns with lines, it's a table
-        return table_info["num_rows"] >= 2 and table_info["num_cols"] >= 2
+        
+        # 4. For pages with at least 2 rows — assume it's tabular if rows are regular
+        if table_info["num_rows"] >= 4:
+            return True
+        
+        # 5. Default: if we have rows and at least some structure
+        if table_info["num_rows"] >= 2:
+            return True
+        
+        return False
 
     def _table_confidence(self, table_info: dict) -> float:
         """Calculate confidence that this is actually a table page."""
@@ -638,7 +737,7 @@ class LayoutDetector:
         if gray_raw is not None:
             table_info = self.detect_table_boundaries_from_raw(gray_raw)
         else:
-            table_info = self.detect_table_boundaries(gray)
+            table_info = self.detect_table_robust(image, gray_raw)
 
         # 2. Determine if this is a table page or text page
         is_table = self._is_table_page(gray, table_info)

@@ -7,6 +7,15 @@ from pathlib import Path
 
 from app.services.light_preprocess import (
     light_preprocess,
+    _deskew_robust as _deskew,
+    _limit_image_size,
+    _color_normalize,
+    _mild_denoise,
+    _illumination_normalize,
+    _remove_borders,
+    MAX_IMAGE_DIMENSION,
+) (
+    light_preprocess,
     _deskew,
     _limit_image_size,
     _color_normalize,

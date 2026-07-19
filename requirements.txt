@@ -1,20 +1,21 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 
-python-multipart==0.0.20
+python-multipart>=0.0.6
 
-pydantic==2.11.7
+pydantic>=2.5.0
 pydantic-settings==2.10.1
 
 opencv-python==4.12.0.88
+opencv-python-headless>=4.8.1
 
 numpy<=2.3.0
-pillow==11.3.0
+pillow>=10.1.0
 
-torch==2.7.1
-torchvision==0.22.1
+torch>=2.1.0
+torchvision==0.16.0
 
-transformers==4.53.2
+transformers>=4.36.0
 accelerate==1.9.0
 
 sentencepiece==0.2.0
@@ -22,12 +23,14 @@ timm==1.0.19
 
 pandas==2.3.1
 
-loguru==0.7.3
+loguru>=0.7.2
 
 PyYAML==6.0.2
 
-httpx==0.28.1
+httpx>=0.25.0
 
 python-dotenv==1.1.1
 
 pytest==8.4.1
+
+easyocr>=1.7.2

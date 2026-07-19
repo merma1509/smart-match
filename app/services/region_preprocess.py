@@ -38,92 +38,68 @@ def _limit_image_size(image: np.ndarray, max_dim: int = 2000) -> np.ndarray:
 
 # ── Region-Type Specific Preprocessors ──
 def preprocess_printed_text(region: np.ndarray) -> np.ndarray:
-    """Preprocess a printed text region for OCR.
-
-    Strategy:
-        1. Grayscale
-        2. CLAHE contrast enhancement (stronger than light preprocessing)
-        3. Sharpening via unsharp mask
-        4. Adaptive thresholding (binarization)
-        5. Morphological cleanup (close small gaps, open noise)
-
-    Best for: column headers, printed labels, page titles.
+    """Preprocess a printed text region for TrOCR.
+    
+    KEY: TrOCR models work with grayscale, NOT binarized images!
+    Adaptive thresholding DESTROYS text quality for TrOCR.
     """
     steps = []
-
+    
     # 1. Grayscale
     processed = _to_grayscale(region)
     steps.append("grayscale")
-
-    # 2. Strong CLAHE for printed text
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    
+    # 2. Gentle CLAHE (lower clip limit)
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
     processed = clahe.apply(processed)
-    steps.append("clahe(3.0)")
-
-    # 3. Unsharp mask sharpening
-    blurred = cv2.GaussianBlur(processed, (0, 0), 3.0)
-    sharpened = cv2.addWeighted(processed, 1.5, blurred, -0.5, 0)
+    steps.append("clahe(1.5)")
+    
+    # 3. Denoise (mild, preserve edges)
+    processed = cv2.fastNlMeansDenoising(processed, None, h=5, 
+                                          templateWindowSize=7, 
+                                          searchWindowSize=21)
+    steps.append("denoise(h=5)")
+    
+    # 4. Gentle sharpen
+    blurred = cv2.GaussianBlur(processed, (0, 0), 1.0)
+    sharpened = cv2.addWeighted(processed, 1.3, blurred, -0.3, 0)
     processed = sharpened
     steps.append("sharpen")
-
-    # 4. Adaptive thresholding
-    processed = cv2.adaptiveThreshold(
-        processed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 31, 2
-    )
-    steps.append("adaptive_threshold(31,2)")
-
-    # 5. Morphological cleanup
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    processed = cv2.morphologyEx(processed, cv2.MORPH_CLOSE, kernel, iterations=1)
-    processed = cv2.morphologyEx(processed, cv2.MORPH_OPEN, kernel, iterations=1)
-    steps.append("morph_clean")
-
+    
+    # 5. NO binarization! TrOCR needs grayscale
+    # NOT: cv2.adaptiveThreshold(...)
+    
     logger.debug(f"Printed text preprocessing: {' -> '.join(steps)}")
     return processed
 
 
 def preprocess_handwritten(region: np.ndarray) -> np.ndarray:
-    """Preprocess a handwritten text region for OCR.
-
-    Strategy:
-        1. Grayscale
-        2. Mild denoising (preserve stroke edges)
-        3. Background smoothing (remove paper texture)
-        4. Stroke enhancement (morphological to thicken faint strokes)
-        5. NO binarization — TrOCR works better on grayscale
-
-    Best for: handwritten names, dates, record entries.
+    """Preprocess handwritten region for TrOCR.
+    
+    TrOCR models pre-trained on handwritten text expect 
+    the image to look like the training data — grayscale, 
+    slightly denoised, but NOT binarized.
     """
     steps = []
-
+    
     # 1. Grayscale
     processed = _to_grayscale(region)
     steps.append("grayscale")
-
-    # 2. Mild denoising — preserve edges
-    processed = cv2.fastNlMeansDenoising(processed, None, h=5, templateWindowSize=7, searchWindowSize=21)
-    steps.append("denoise(h=5)")
-
-    # 3. Background subtraction to remove paper texture
-    blur = cv2.GaussianBlur(processed, (15, 15), 0)
-    processed = cv2.subtract(blur, processed)  # Inverted: dark ink on light bg
-    processed = cv2.normalize(processed, None, 0, 255, cv2.NORM_MINMAX)
-    processed = 255 - processed  # Invert back
-    steps.append("bg_removal")
-
-    # 4. Mild CLAHE for local contrast
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    
+    # 2. Gentle denoise
+    processed = cv2.fastNlMeansDenoising(processed, None, h=3,
+                                          templateWindowSize=7,
+                                          searchWindowSize=21)
+    steps.append("denoise(h=3)")
+    
+    # 3. Gentle CLAHE for contrast
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
     processed = clahe.apply(processed)
-    steps.append("clahe(2.0)")
-
-    # 5. Stroke enhancement — slight dilation of dark strokes
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-    processed = cv2.morphologyEx(processed, cv2.MORPH_CLOSE, kernel, iterations=1)
-    steps.append("stroke_enhance")
-
-    # 6. NO thresholding — preserve grayscale for TrOCR
-
+    steps.append("clahe(1.5)")
+    
+    # 4. NO aggressive morphology, NO background subtraction
+    # TrOCR handles these internally
+    
     logger.debug(f"Handwritten preprocessing: {' -> '.join(steps)}")
     return processed
 
@@ -294,11 +270,11 @@ def preprocess_region(region: np.ndarray, region_type: str, **kwargs) -> np.ndar
     preprocessors = {
         "printed_text": preprocess_printed_text,
         "handwritten": preprocess_handwritten,
-        "table_cell": preprocess_table_cell,
+        "table_cell": None,
         "stamp": preprocess_stamp,
         "signature": preprocess_signature,
         "marginal_note": preprocess_marginal_note,
-        "data_cell": preprocess_table_cell, 
+        "data_cell": None, 
         "header_row": preprocess_printed_text,
         "text_block": preprocess_printed_text,
         "record_block": preprocess_table_cell,

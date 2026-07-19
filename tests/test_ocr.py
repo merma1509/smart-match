@@ -4,7 +4,7 @@ import cv2
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
-from app.services.ocr import OCREngine, create_ocr_engine, recognize_text
+from app.services.ocr import OCREngine, recognize_text, get_engine
 import subprocess
 
 
@@ -235,9 +235,9 @@ class TestCache:
 
 # ── Test: Helper Functions ──────────────────────────────────────────────────
 class TestHelpers:
-    def test_create_ocr_engine(self):
+    def test_get_engine(self):
         """Test factory function."""
-        engine = create_ocr_engine()
+        engine = get_engine()
         assert isinstance(engine, OCREngine)
 
     def test_recognize_text(self, sample_image_array):
