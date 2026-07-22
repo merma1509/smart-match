@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from app.core.config import settings
 from app.services.extraction import extract_information
 from app.services.layout import analyze_layout
 from app.services.light_preprocess import light_preprocess
@@ -18,10 +19,10 @@ from app.services.postprocessing import postprocess_ocr_text
 
 router = APIRouter()
 
-UPLOAD_DIR = Path("uploads")
-RESULTS_DIR = Path("results")
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+UPLOAD_DIR = Path(settings.input_dir)
+RESULTS_DIR = Path(settings.output_dir)
+ALLOWED_EXTENSIONS = {e for e in settings.allowed_extensions if e in {".jpg", ".jpeg", ".png"}}
+MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024
 
 
 def validate_file(file: UploadFile):
@@ -29,7 +30,7 @@ def validate_file(file: UploadFile):
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"File type '{ext}' not allowed. Allowed: {ALLOWED_EXTENSIONS}")
     if file.size and file.size > MAX_FILE_SIZE:
-        raise HTTPException(400, f"File too large ({file.size} bytes). Max: 50MB")
+        raise HTTPException(400, f"File too large ({file.size} bytes). Max: {settings.max_file_size_mb}MB")
 
 
 def _process_single_image(image_path: Path, file_name: str, request_id: str) -> dict:
@@ -43,13 +44,13 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
     logger.info(f"[{request_id}] Image: {image.shape}")
 
     # 1. Preprocess
-    preprocessed, metrics = light_preprocess(image, max_dim=3000, return_metrics=True)
+    preprocessed, metrics = light_preprocess(image, max_dim=settings.max_image_dimension, return_metrics=True)
 
     # 2. Layout analysis
     gray_raw = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     h, w = image.shape[:2]
-    if max(h, w) > 3000:
-        scale = 3000 / max(h, w)
+    if max(h, w) > settings.max_image_dimension:
+        scale = settings.max_image_dimension / max(h, w)
         gray_raw = cv2.resize(gray_raw, (int(w * scale), int(h * scale)))
 
     layout = analyze_layout(preprocessed, gray_raw=gray_raw)
@@ -94,6 +95,7 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
 
     # 6. Save result
     result_path = RESULTS_DIR / f"{request_id}.json"
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
 
@@ -112,6 +114,7 @@ async def extract(file: UploadFile = File(...)):
     request_id = str(uuid.uuid4())[:8]
 
     ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     input_path = UPLOAD_DIR / f"{request_id}{ext}"
     content = await file.read()
     with open(input_path, "wb") as f:

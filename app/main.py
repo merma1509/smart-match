@@ -1,33 +1,62 @@
-"""Smart Match API — Main entry point."""
-
-from pathlib import Path
-
+"""FastAPI application entry point."""
+import uvicorn
 from fastapi import FastAPI
-from loguru import logger
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.extract import router as extract_router
 from app.api.routes.health import router as health_router
 from app.api.routes.results import router as results_router
-from app.services.ocr import preload_models
+from app.core.config import settings, validate_config
+from app.core.logging import logger
 
 app = FastAPI(
-    title="Smart Match API",
-    description="AI-powered document intelligence for historical Russian metrical books",
-    version="1.0.0",
+    title=settings.app_name,
+    version=settings.app_version,
+    description="Genealogical data extraction from metrical books",
 )
 
-# Create directories
-Path("uploads").mkdir(exist_ok=True)
-Path("results").mkdir(exist_ok=True)
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Register routers
-app.include_router(health_router)  # GET /, GET /health
-app.include_router(extract_router)  # POST /extract
-app.include_router(results_router)  # GET /results, GET /results/{id}
+# Routers
+app.include_router(health_router)
+app.include_router(extract_router)
+app.include_router(results_router)
 
 
 @app.on_event("startup")
 async def startup():
-    logger.info("Starting Smart Match API...")
+    logger.info(f"Starting {settings.app_name} API...")
+    try:
+        validate_config()
+        logger.info(f"Configuration validated: {settings.app_version}")
+    except RuntimeError as e:
+        logger.error(f"Configuration error: {e}")
+        raise
+
+    # Preload heavy models
+    from app.services.ocr import preload_models
     preload_models()
-    logger.info("Smart Match API ready")
+
+    logger.info(f"{settings.app_name} API ready")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    logger.info(f"{settings.app_name} API shutting down")
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app.main:app",
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=False,
+        log_level=settings.log_level.lower(),
+    )

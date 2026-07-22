@@ -4,17 +4,19 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from app.core.config import settings
+
 router = APIRouter()
 
-UPLOAD_DIR = Path("uploads")
-RESULTS_DIR = Path("results")
+UPLOAD_DIR = Path(settings.input_dir)
+RESULTS_DIR = Path(settings.output_dir)
 
 
 @router.get("/")
 def root():
     return {
-        "service": "Smart Match API",
-        "version": "1.1.0",
+        "service": settings.app_name,
+        "version": settings.app_version,
         "status": "running",
         "endpoints": {
             "GET /": "This info",
@@ -34,9 +36,9 @@ def health():
     issues = []
 
     if not UPLOAD_DIR.exists():
-        issues.append("uploads directory missing")
+        issues.append("input directory missing")
     if not RESULTS_DIR.exists():
-        issues.append("results directory missing")
+        issues.append("output directory missing")
 
     for d in [UPLOAD_DIR, RESULTS_DIR]:
         if d.exists() and not os.access(d, os.W_OK):
@@ -48,7 +50,7 @@ def health():
 
     return {
         "status": status,
-        "service": "smart-match",
-        "version": "1.1.0",
+        "service": settings.app_name,
+        "version": settings.app_version,
         "issues": issues if issues else None,
     }

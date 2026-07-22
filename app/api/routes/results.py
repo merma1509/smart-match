@@ -3,10 +3,13 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
+
+from app.core.config import settings
 
 router = APIRouter(prefix="/results", tags=["results"])
 
-RESULTS_DIR = Path("results")
+RESULTS_DIR = Path(settings.output_dir)
 
 
 @router.get("/")
@@ -36,8 +39,8 @@ def list_results(
                         "time": data.get("processing_time_seconds", 0),
                     }
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Failed to read result {f.name}: {exc}")
 
     return {
         "total": total,
@@ -71,11 +74,14 @@ def delete_result(result_id: str):
         raise HTTPException(404, f"Result {result_id} not found")
 
     # Also delete the uploaded file
+    upload_dir = Path(settings.input_dir)
     for ext in [".jpg", ".jpeg", ".png"]:
-        upload_path = Path("uploads") / f"{result_id}{ext}"
+        upload_path = upload_dir / f"{result_id}{ext}"
         if upload_path.exists():
             upload_path.unlink()
+            logger.info(f"Deleted upload: {upload_path}")
             break
 
     result_path.unlink()
+    logger.info(f"Deleted result: {result_path}")
     return {"status": "deleted", "id": result_id}

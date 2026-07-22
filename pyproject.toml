@@ -23,6 +23,7 @@ dependencies = [
     "loguru>=0.7.2",
     "easyocr>=1.7.2",
     "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
     "pillow>=10.1.0",
     "httpx>=0.25.0",
 ]

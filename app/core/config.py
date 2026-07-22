@@ -1,13 +1,13 @@
-# I'm sure scholarshipCentralizes all configuration settings in one place
+# Centralizes all configuration settings in one place
 import os
+from pathlib import Path
+from pydantic import BaseModel
 
-from pydantic_settings import BaseSettings
 
-
-class Settings(BaseSettings):
+class Settings(BaseModel):
     # App Name, Version, API host/port
     app_name: str = "Smart Match"
-    app_version: str = "0.1.0"
+    app_version: str = "1.1.0"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
@@ -16,28 +16,24 @@ class Settings(BaseSettings):
     output_dir: str = "data/output"
 
     # OCR model (Russian-optimized)
-    ocr_model_name: str = "taiga75/ru-trocr-1700s"  # Russian historical text model
+    ocr_model_name: str = "taiga75/ru-trocr-1700s"
     ocr_handwritten_model: str = "taiga75/ru-trocr-1700s"
     ocr_printed_model: str = "taiga75/ru-trocr-1700s"
     ocr_confidence_threshold: float = 0.7
-    tesseract_lang: str = "rus"  # Default language for Tesseract
+    tesseract_lang: str = "rus"
 
     # File upload limits and allowed extensions
-    max_file_size_mb: int = 10
-    allowed_extensions: list[str] = [".jpg", ".jpeg", ".png", ".tiff", ".bmp"]
+    max_file_size_mb: int = 50
+    allowed_extensions: list[str] = [".jpg", ".jpeg", ".png"]
 
     # Preprocessing defaults
-    max_image_dimension: int = 4000
-    default_language: str = "ru"  # Default language for processing
+    max_image_dimension: int = 3000
+    default_language: str = "ru"
 
     # Log settings
     log_level: str = "INFO"
     log_rotation: str = "10 MB"
     log_retention: str = "7 days"
-
-    class Config:
-        env_file = ".env"
-        env_prefix = "SMART_MATCH_"
 
 
 settings = Settings()
@@ -47,10 +43,9 @@ def validate_config():
     """Validate configuration on startup."""
     errors = []
 
-    # Check directories exist
+    # Create directories if they don't exist
     for dir_path in [settings.input_dir, settings.output_dir]:
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path, exist_ok=True)
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
 
     # Check allowed extensions
     if not settings.allowed_extensions:
