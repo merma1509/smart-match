@@ -1,4 +1,5 @@
 """Script to run all tests with coverage report."""
+
 import subprocess
 import sys
 
@@ -6,14 +7,17 @@ import sys
 def run_tests():
     """Run pytest with coverage and verbose output."""
     cmd = [
-        sys.executable, "-m", "pytest",
+        sys.executable,
+        "-m",
+        "pytest",
         "tests/",
         "-v",
         "--tb=short",
         "--cov=app.services",
         "--cov-report=term-missing",
         "--cov-report=html:coverage_report",
-        "-p", "no:warnings",
+        "-p",
+        "no:warnings",
     ]
 
     print("=" * 60)

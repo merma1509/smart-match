@@ -9,8 +9,9 @@ Options:
     --max-dim          Max image dimension (default: 2000)
     --apply-threshold  Apply binary thresholding
 """
-import sys
+
 import os
+import sys
 from pathlib import Path
 
 import cv2
@@ -38,7 +39,6 @@ def compare_original_vs_preprocessed(
     if original is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
 
-    original_rgb = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
     logger.info(f"Original size: {original.shape[1]}x{original.shape[0]}")
 
     # ── 2. Preprocess ──────────────────────────────────────────────────────
@@ -81,11 +81,13 @@ def compare_original_vs_preprocessed(
     else:
         preprocessed_padded = preprocessed_resized
 
-    side_by_side = cv2.hconcat([
-        original_padded,
-        np.ones((orig_h, 10, 3), dtype=np.uint8) * 128,  # grey divider
-        preprocessed_padded,
-    ])
+    side_by_side = cv2.hconcat(
+        [
+            original_padded,
+            np.ones((orig_h, 10, 3), dtype=np.uint8) * 128,  # grey divider
+            preprocessed_padded,
+        ]
+    )
 
     # Add labels
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -119,16 +121,11 @@ def compare_original_vs_preprocessed(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Compare original vs preprocessed image"
-    )
+    parser = argparse.ArgumentParser(description="Compare original vs preprocessed image")
     parser.add_argument("image", help="Path to input image")
-    parser.add_argument("--output-dir", default="comparison_results",
-                        help="Output directory")
-    parser.add_argument("--max-dim", type=int, default=2000,
-                        help="Max image dimension")
-    parser.add_argument("--apply-threshold", action="store_true",
-                        help="Apply binary thresholding")
+    parser.add_argument("--output-dir", default="comparison_results", help="Output directory")
+    parser.add_argument("--max-dim", type=int, default=2000, help="Max image dimension")
+    parser.add_argument("--apply-threshold", action="store_true", help="Apply binary thresholding")
     args = parser.parse_args()
 
     result = compare_original_vs_preprocessed(

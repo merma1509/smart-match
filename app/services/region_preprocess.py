@@ -13,10 +13,10 @@ optimized preprocessing based on region type:
 Each function returns a preprocessed grayscale image ready for OCR.
 """
 
+
 import cv2
 import numpy as np
 from loguru import logger
-from typing import Optional
 
 
 # ── Shared Helpers
@@ -39,67 +39,67 @@ def _limit_image_size(image: np.ndarray, max_dim: int = 2000) -> np.ndarray:
 # ── Region-Type Specific Preprocessors ──
 def preprocess_printed_text(region: np.ndarray) -> np.ndarray:
     """Preprocess a printed text region for TrOCR.
-    
+
     KEY: TrOCR models work with grayscale, NOT binarized images!
     Adaptive thresholding DESTROYS text quality for TrOCR.
     """
     steps = []
-    
+
     # 1. Grayscale
     processed = _to_grayscale(region)
     steps.append("grayscale")
-    
+
     # 2. Gentle CLAHE (lower clip limit)
     clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
     processed = clahe.apply(processed)
     steps.append("clahe(1.5)")
-    
+
     # 3. Denoise (mild, preserve edges)
-    processed = cv2.fastNlMeansDenoising(processed, None, h=5, 
-                                          templateWindowSize=7, 
-                                          searchWindowSize=21)
+    processed = cv2.fastNlMeansDenoising(
+        processed, None, h=5, templateWindowSize=7, searchWindowSize=21
+    )
     steps.append("denoise(h=5)")
-    
+
     # 4. Gentle sharpen
     blurred = cv2.GaussianBlur(processed, (0, 0), 1.0)
     sharpened = cv2.addWeighted(processed, 1.3, blurred, -0.3, 0)
     processed = sharpened
     steps.append("sharpen")
-    
+
     # 5. NO binarization! TrOCR needs grayscale
     # NOT: cv2.adaptiveThreshold(...)
-    
+
     logger.debug(f"Printed text preprocessing: {' -> '.join(steps)}")
     return processed
 
 
 def preprocess_handwritten(region: np.ndarray) -> np.ndarray:
     """Preprocess handwritten region for TrOCR.
-    
-    TrOCR models pre-trained on handwritten text expect 
-    the image to look like the training data — grayscale, 
+
+    TrOCR models pre-trained on handwritten text expect
+    the image to look like the training data — grayscale,
     slightly denoised, but NOT binarized.
     """
     steps = []
-    
+
     # 1. Grayscale
     processed = _to_grayscale(region)
     steps.append("grayscale")
-    
+
     # 2. Gentle denoise
-    processed = cv2.fastNlMeansDenoising(processed, None, h=3,
-                                          templateWindowSize=7,
-                                          searchWindowSize=21)
+    processed = cv2.fastNlMeansDenoising(
+        processed, None, h=3, templateWindowSize=7, searchWindowSize=21
+    )
     steps.append("denoise(h=3)")
-    
+
     # 3. Gentle CLAHE for contrast
     clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
     processed = clahe.apply(processed)
     steps.append("clahe(1.5)")
-    
+
     # 4. NO aggressive morphology, NO background subtraction
     # TrOCR handles these internally
-    
+
     logger.debug(f"Handwritten preprocessing: {' -> '.join(steps)}")
     return processed
 
@@ -127,10 +127,7 @@ def preprocess_table_cell(region: np.ndarray) -> np.ndarray:
     border = 2
     if h > border * 2 and w > border * 2:
         center = processed[border:-border, border:-border]
-        processed = cv2.copyMakeBorder(
-            center, border, border, border, border,
-            cv2.BORDER_REPLICATE
-        )
+        processed = cv2.copyMakeBorder(center, border, border, border, border, cv2.BORDER_REPLICATE)
     steps.append("border_clean")
 
     # 3. Normalize brightness
@@ -240,8 +237,7 @@ def preprocess_marginal_note(region: np.ndarray) -> np.ndarray:
 
     # 3. Adaptive threshold
     processed = cv2.adaptiveThreshold(
-        processed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 15, 3
+        processed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3
     )
     steps.append("adaptive_threshold(15,3)")
 
@@ -274,7 +270,7 @@ def preprocess_region(region: np.ndarray, region_type: str, **kwargs) -> np.ndar
         "stamp": preprocess_stamp,
         "signature": preprocess_signature,
         "marginal_note": preprocess_marginal_note,
-        "data_cell": None, 
+        "data_cell": None,
         "header_row": preprocess_printed_text,
         "text_block": preprocess_printed_text,
         "record_block": preprocess_table_cell,
@@ -307,7 +303,7 @@ def preprocess_regions(regions: list, full_image: np.ndarray) -> list:
         cropped = full_image[y1:y2, x1:x2]
         if cropped.size == 0:
             continue
-        
+
         # Use region_type property for data_cells to pick handwritten vs printed
         region_type = region["type"]
         if region_type == "data_cell":
@@ -317,10 +313,10 @@ def preprocess_regions(regions: list, full_image: np.ndarray) -> list:
                 region_type = "handwritten"
             else:
                 region_type = "printed_text"
-        
+
         preprocessed = preprocess_region(cropped, region_type)
         results.append({**region, "original_region": cropped, "preprocessed": preprocessed})
-    
+
     return results
 
 

@@ -1,213 +1,136 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-import cv2
-import numpy as np
-import os
-from app.services.region_preprocess import process_image, to_grayscale, clahe_contrast, limit_image_size
-from app.services.layout_detection import detect_layout, segment_records
-from app.services.ocr import OCREngine
-from app.services.postprocessing import postprocess_ocr_text
-from app.services.information_extraction import extract_information
-from app.services.normalization import normalize_data
-from app.services.validation import validate_data
-from app.services.confidence_scoring import score_confidence
-from app.services.entity_resolution import resolve_entities
-from pydantic import BaseModel
-from typing import Optional, Any, Dict
-import logging
+"""POST /extract endpoint — main pipeline."""
 
-logger = logging.getLogger(__name__)
+import json
+import os
+import time
+import uuid
+from pathlib import Path
+
+import cv2
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+from loguru import logger
+
+from app.services.extraction import extract_information
+from app.services.layout import analyze_layout
+from app.services.light_preprocess import light_preprocess
+from app.services.ocr import recognize_text
+from app.services.postprocessing import postprocess_ocr_text
 
 router = APIRouter()
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".bmp"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+UPLOAD_DIR = Path("uploads")
+RESULTS_DIR = Path("results")
 
-# Initialize OCR engine once with Russian support
-ocr_engine = None
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-def get_ocr_engine():
-    global ocr_engine
-    if ocr_engine is None:
-        ocr_engine = OCREngine(
-            handwritten_model="taiga75/ru-trocr-1700s",
-            printed_model="taiga75/ru-trocr-1700s",
-            tesseract_lang="rus+eng"
-        )
-    return ocr_engine
 
 def validate_file(file: UploadFile):
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"File type '{ext}' not allowed. Allowed: {ALLOWED_EXTENSIONS}")
-    file.file.seek(0, 2)
-    size = file.file.tell()
-    file.file.seek(0)
-    if size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large ({size} bytes). Max: {MAX_FILE_SIZE} bytes")
+        raise HTTPException(400, f"File type '{ext}' not allowed. Allowed: {ALLOWED_EXTENSIONS}")
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(400, f"File too large ({file.size} bytes). Max: 50MB")
 
-def preprocess_for_language(image, language: str):
-    """Apply language-specific preprocessing.
-    
-    Russian documents: CLAHE enhancement only, no adaptive threshold
-    English/German: Full preprocessing with adaptive threshold
-    """
-    if language == "ru":
-        # Russian: gentle preprocessing — CLAHE + denoise only
-        gray = to_grayscale(image)
-        gray = limit_image_size(gray, 2000)
-        gray = clahe_contrast(gray, clip_limit=2.0)
-        return gray
-    else:
-        # Default: full preprocessing pipeline
-        return process_image(
-            image,
-            max_image_dim=2000,
-            apply_clahe=True,
-            apply_deskew=True,
-            apply_inpaint=False,
-            apply_morphological=False,
-            apply_crop=True,
-            apply_border_removal=True,
-            apply_resolution_norm=False
-        )
 
 @router.post("/extract")
-async def extract_document(
-    file: UploadFile = File(...),
-    language: str = "auto"  # "auto", "ru", "en", "de"
-):
+async def extract(file: UploadFile = File(...)):
+    """Extract structured genealogical data from a scanned metrical book page.
+
+    Accepts: JPG, PNG images
+    Returns: JSON with extracted fields and confidence scores
     """
-    AI-powered document intelligence endpoint.
-    
-    Processes scanned metrical book pages through a multi-stage pipeline:
-    1. Image Preprocessing → 2. Layout Detection → 3. OCR → 
-    4. Information Extraction → 5. Normalization & Validation → 
-    6. Confidence Scoring → 7. Structured JSON Output
-    
-    Based on Smart Match system architecture [1].
-    """
-    # --- Step 0: Input Validation ---
     validate_file(file)
-    contents = await file.read()
-    
-    nparr = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not decode image")
-    
+
+    start_time = time.time()
+    request_id = str(uuid.uuid4())[:8]
+
+    # 1. Save uploaded file
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    input_path = UPLOAD_DIR / f"{request_id}{ext}"
+    content = await file.read()
+    with open(input_path, "wb") as f:
+        f.write(content)
+
+    logger.info(f"[{request_id}] Processing: {file.filename} ({len(content)} bytes)")
+
     try:
-        engine = get_ocr_engine()
-        
-        # Determine language settings
-        if language == "auto":
-            language = "ru"  # Default to Russian for historical docs
-        
-        # --- Step 1: Image Preprocessing ---
-        logger.info("Step 1: Image preprocessing")
-        processed = preprocess_for_language(image, language)
-        
-        # --- Step 2: Layout Detection ---
-        logger.info("Step 2: Layout analysis and record detection")
-        try:
-            layout_result = detect_layout(processed)
-            record_regions = segment_records(processed, layout_result)
-            logger.info(f"Detected {len(record_regions)} record regions")
-        except Exception as e:
-            logger.warning(f"Layout detection failed, falling back to full image: {e}")
-            record_regions = [processed]  # Fallback: process whole image
-        
-        # --- Step 3: OCR ---
-        logger.info("Step 3: Optical Character Recognition")
-        all_texts = []
-        overall_confidence = 0.0
-        
-        for i, region in enumerate(record_regions):
-            if language == "ru":
-                ocr_result = engine.recognize_with_voting(
-                    region, 
-                    trocr_model="handwritten",
-                    language_hint="ru"
-                )
-            elif language in ["en", "de"]:
-                ocr_result = engine.recognize_with_voting(
-                    region,
-                    trocr_model="auto",
-                    language_hint=language
-                )
-            else:
-                ocr_result = engine.recognize_with_voting(region)
-            
-            all_texts.append(ocr_result["text"])
-            overall_confidence += ocr_result.get("confidence", 0.0)
-        
-        raw_text = "\n".join(all_texts)
-        overall_confidence = overall_confidence / len(record_regions) if record_regions else 0.0
-        
-        if not raw_text.strip():
-            raise HTTPException(status_code=422, detail="No text could be extracted from the image")
-        
-        # --- Step 4: Post-processing & Information Extraction ---
-        logger.info("Step 4: Information extraction")
-        postprocessed = postprocess_ocr_text(raw_text)
-        clean_text = postprocessed["corrected_text"]
-        
-        extraction = extract_information(clean_text)
-        record_type = extraction.get("record_type", "unknown")
-        
-        # --- Step 5: Data Normalization and Validation ---
-        logger.info("Step 5: Data normalization and validation")
-        normalized = normalize_data(extraction)
-        validation_result = validate_data(normalized)
-        
-        # --- Step 6: Confidence Scoring ---
-        logger.info("Step 6: Confidence scoring")
-        scored = score_confidence(
-            extraction_data=normalized,
-            ocr_confidence=overall_confidence,
-            postprocess_corrections=postprocessed["corrections_applied"],
-            validation_errors=validation_result.get("errors", [])
+        # 2. Load image
+        image = cv2.imread(str(input_path))
+        if image is None:
+            raise HTTPException(400, "Cannot read image file")
+
+        logger.info(f"[{request_id}] Image: {image.shape}")
+
+        # 3. Preprocess
+        preprocessed, metrics = light_preprocess(image, max_dim=3000, return_metrics=True)
+
+        # 4. Layout analysis
+        gray_raw = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        h, w = image.shape[:2]
+        if max(h, w) > 3000:
+            scale = 3000 / max(h, w)
+            gray_raw = cv2.resize(gray_raw, (int(w * scale), int(h * scale)))
+
+        layout = analyze_layout(preprocessed, gray_raw=gray_raw)
+        logger.info(
+            f"[{request_id}] Layout: {layout['page_type']}, {len(layout['elements'])} elements"
         )
-        
-        # --- Step 7: Entity Resolution (optional enrichment) ---
-        resolved = resolve_entities(scored)
-        
-        # --- Step 8: Build structured response ---
-        response = {
-            "filename": file.filename,
-            "status": "processed",
-            "language": language,
-            "pipeline": {
-                "preprocessing": "completed",
-                "layout_detection": "completed" if len(record_regions) > 1 else "fallback_full_image",
-                "ocr_engine": ocr_result.get("model_used", "unknown"),
-                "information_extraction": "completed",
-                "normalization": "completed",
-                "validation": "completed",
-                "confidence_scoring": "completed"
-            },
-            "record": {
-                "record_type": record_type,
-                "fields": resolved.get("fields", {}),
-                "needs_review": validation_result.get("needs_review", False),
-                "review_reasons": validation_result.get("review_reasons", [])
-            },
-            "confidence": {
-                "overall": scored.get("overall_confidence", overall_confidence),
-                "per_field": scored.get("field_confidences", {})
-            },
-            "metadata": {
-                "ocr_confidence": overall_confidence,
-                "corrections_applied": postprocessed["corrections_applied"],
-                "validation_errors": validation_result.get("errors", []),
-                "regions_detected": len(record_regions)
-            }
+
+        # 5. OCR on text regions
+        texts = []
+        for elem in layout["elements"]:
+            if elem["type"] in ("data_cell", "text_block", "header_row", "record_block"):
+                x1, y1, x2, y2 = elem["bbox"]
+                crop = preprocessed[y1:y2, x1:x2]
+                if crop.size == 0:
+                    continue
+                result = recognize_text(crop)
+                if result["text"].strip():
+                    texts.append(result["text"])
+
+        full_text = "\n".join(texts)
+        logger.info(f"[{request_id}] OCR text length: {len(full_text)} chars")
+
+        # 6. Postprocess and extract
+        postprocessed = postprocess_ocr_text(full_text)
+        corrected_text = postprocessed["corrected_text"]
+        extracted = extract_information(corrected_text)
+
+        # 7. Build result
+        elapsed = round(time.time() - start_time, 2)
+        result = {
+            "request_id": request_id,
+            "file": file.filename,
+            "processing_time_seconds": elapsed,
+            "image_size": f"{image.shape[1]}x{image.shape[0]}",
+            "quality_metrics": metrics,
+            "page_type": layout["page_type"],
+            "num_elements": len(layout["elements"]),
+            "extracted_data": extracted,
+            "raw_text_preview": full_text[:500],
+            "needs_review": extracted.get("needs_review", True),
         }
-        
-        logger.info(f"Successfully processed {file.filename}")
-        return response
-        
+
+        # 8. Save result
+        result_path = RESULTS_DIR / f"{request_id}.json"
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+
+        logger.info(
+            f"[{request_id}] Done in {elapsed}s | "
+            f"type={extracted.get('record_type', '?')} | "
+            f"review={extracted.get('needs_review', True)}"
+        )
+
+        return JSONResponse(result)
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Processing failed for {file.filename}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        logger.error(f"[{request_id}] Failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(500, f"Processing failed: {str(e)}")

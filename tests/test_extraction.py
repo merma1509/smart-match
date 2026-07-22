@@ -1,9 +1,8 @@
 """Tests for Information Extraction Service."""
+
 import pytest
+
 from app.services.extraction import InformationExtractor
-from app.schemas.birth import BirthRecord
-from app.schemas.death import DeathRecord
-from app.schemas.marriage import MarriageRecord
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -87,6 +86,7 @@ class TestRecordTypeDetection:
 
 # ── Test: Birth Record Extraction ───────────────────────────────────────────
 
+
 class TestBirthExtraction:
     def test_extract_child_name(self, extractor, birth_text):
         result = extractor.extract(birth_text)
@@ -129,6 +129,7 @@ class TestBirthExtraction:
 
 # ── Test: Death Record Extraction ───────────────────────────────────────────
 
+
 class TestDeathExtraction:
     def test_extract_deceased_name(self, extractor, death_text):
         result = extractor.extract(death_text)
@@ -147,9 +148,11 @@ class TestDeathExtraction:
     def test_extract_age(self, extractor, death_text):
         result = extractor.extract(death_text)
         # Check for alternative field names or look at actual output
-        age_field = (result.get("age") or 
-                    result.get("deceased_age") or 
-                    next((v for k, v in result.items() if "age" in k.lower()), None))
+        age_field = (
+            result.get("age")
+            or result.get("deceased_age")
+            or next((v for k, v in result.items() if "age" in k.lower()), None)
+        )
         if age_field is None:
             pytest.skip("Age field not found in extraction output")
         assert age_field["value"] != "Unknown"
@@ -166,6 +169,7 @@ class TestDeathExtraction:
 
 
 # ── Test: Marriage Record Extraction ────────────────────────────────────────
+
 
 class TestMarriageExtraction:
     def test_extract_groom_name(self, extractor, marriage_text):
@@ -199,6 +203,7 @@ class TestMarriageExtraction:
 
 # ── Test: Date Normalization ────────────────────────────────────────────────
 
+
 class TestDateNormalization:
     def test_dd_month_yyyy_format(self, extractor):
         """Test '12 марта 1878 года' format."""
@@ -231,6 +236,7 @@ class TestDateNormalization:
 
 # ── Test: Confidence Scoring ────────────────────────────────────────────────
 
+
 class TestConfidenceScoring:
     def test_confidence_metrics_in_result(self, extractor, birth_text):
         result = extractor.extract(birth_text)
@@ -262,6 +268,7 @@ class TestConfidenceScoring:
 
 
 # ── Test: Schema Compatibility ──────────────────────────────────────────────
+
 
 class TestSchemaCompatibility:
     def test_birth_result_matches_schema(self, extractor, birth_text):

@@ -1,7 +1,8 @@
 # Defines the marriage record output structure
+
 from pydantic import BaseModel
-from typing import Optional
-from app.schemas.common import FieldPrediction, NameResolution, ExtractionMetadata
+
+from app.schemas.common import ExtractionMetadata, FieldPrediction, NameResolution
 
 
 class MarriageRecord(BaseModel):
@@ -10,10 +11,10 @@ class MarriageRecord(BaseModel):
     bride_name: FieldPrediction
     marriage_date: FieldPrediction
     needs_review: bool = False
-    
+
     # Optional resolved entities
-    groom_name_resolved: Optional[NameResolution] = None
-    bride_name_resolved: Optional[NameResolution] = None
-    
+    groom_name_resolved: NameResolution | None = None
+    bride_name_resolved: NameResolution | None = None
+
     # Metadata
-    _extraction: Optional[ExtractionMetadata] = None
+    _extraction: ExtractionMetadata | None = None

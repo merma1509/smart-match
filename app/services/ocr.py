@@ -1,20 +1,24 @@
 # app/services/ocr.py
 """OCR — Russian text recognition.
 Primary: EasyOCR for Russian text
-Fallback: Tesseract for clean printed text  
+Fallback: Tesseract for clean printed text
 """
+
 import os
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import numpy as np
-import cv2
-from loguru import logger
 import subprocess
 import tempfile
+
+import cv2
+import numpy as np
+from loguru import logger
 
 # Try EasyOCR
 try:
     import easyocr
+
     EASYOCR_AVAILABLE = True
 except ImportError:
     EASYOCR_AVAILABLE = False
@@ -28,7 +32,7 @@ class OCREngine:
     def get_easyocr(cls):
         if cls._easyocr_reader is None and EASYOCR_AVAILABLE:
             logger.info("Initializing EasyOCR with Russian...")
-            cls._easyocr_reader = easyocr.Reader(['ru'], gpu=False)
+            cls._easyocr_reader = easyocr.Reader(["ru"], gpu=False)
             logger.info("EasyOCR initialized")
         return cls._easyocr_reader
 
@@ -62,7 +66,7 @@ class OCREngine:
                 "text": full_text.strip(),
                 "confidence": round(avg_confidence, 4),
                 "model_used": "easyocr",
-                "blocks": len(results)
+                "blocks": len(results),
             }
         except Exception as e:
             logger.error(f"EasyOCR failed: {e}")
@@ -85,11 +89,13 @@ class OCREngine:
         try:
             result = subprocess.run(
                 ["tesseract", temp_path, "stdout", "-l", lang, "--psm", "6"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             text = result.stdout.strip()
             return {"text": text, "confidence": 0.5 if text else 0.0, "model_used": "tesseract"}
-        except:
+        except Exception:
             return {"text": "", "confidence": 0.0, "model_used": "error"}
         finally:
             if os.path.exists(temp_path):
@@ -98,11 +104,13 @@ class OCREngine:
 
 _engine = None
 
+
 def get_engine() -> OCREngine:
     global _engine
     if _engine is None:
         _engine = OCREngine()
     return _engine
+
 
 def recognize_text(image, region_type: str = "printed", use_voting: bool = False) -> dict:
     engine = get_engine()
@@ -113,10 +121,12 @@ def recognize_text(image, region_type: str = "printed", use_voting: bool = False
             result = tess
     return result
 
+
 def preload_models():
     logger.info("Preloading EasyOCR...")
     OCREngine.get_easyocr()
     logger.info("EasyOCR preloaded")
+
 
 def cleanup_all():
     global _engine

@@ -1,15 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Build
+build/
+*.egg-info/
+dist/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 data/
 models/
-__pycache__/
+uploads/*
+results/*.json
 *.pt
 *.pkl
 
-# Temporary files
-results/*.json
-uploads/*.jpg
-data/cache/
-diagnosis/
-training_data/
-__pycache__/
-*.pyc
-.DS_Store
+# Docker
+.dockerignore
+
+# Testing
+.pytest_cache/
+.ruff_cache/

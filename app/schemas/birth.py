@@ -1,7 +1,8 @@
 # Defines the birth record output structure
+
 from pydantic import BaseModel
-from typing import Optional
-from app.schemas.common import FieldPrediction, NameResolution, ExtractionMetadata
+
+from app.schemas.common import ExtractionMetadata, FieldPrediction, NameResolution
 
 
 class BirthRecord(BaseModel):
@@ -12,14 +13,14 @@ class BirthRecord(BaseModel):
     father_name: FieldPrediction
     mother_name: FieldPrediction
     needs_review: bool = False
-    
+
     # Optional resolved entities
-    child_name_resolved: Optional[NameResolution] = None
-    father_name_resolved: Optional[NameResolution] = None
-    mother_name_resolved: Optional[NameResolution] = None
-    
+    child_name_resolved: NameResolution | None = None
+    father_name_resolved: NameResolution | None = None
+    mother_name_resolved: NameResolution | None = None
+
     # Optional computed fields
-    age_computed: Optional[dict] = None
-    
+    age_computed: dict | None = None
+
     # Metadata
-    _extraction: Optional[ExtractionMetadata] = None
+    _extraction: ExtractionMetadata | None = None

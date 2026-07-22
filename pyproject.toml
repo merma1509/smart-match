@@ -1,6 +1,60 @@
-[project.optional-dependencies]
-cli = [
-    "click>=8.0",
-    "rich>=12.0",
-    "httpx>=0.24",
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-match"
+version = "1.0.0"
+description = "AI-powered document intelligence for historical Russian metrical books"
+readme = "README.md"
+authors = [
+    {name = "Ayomide Isreal Ajibade", email = "a.ajibade@innopolis.university"},
+    {name = "Niyonshuti Martin", email = "m.niyonshuti@innopolis.university"},
 ]
+maintainers = [{name = "Smart Match Team"}]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "python-multipart>=0.0.6",
+    "opencv-python-headless>=4.8.1",
+    "numpy>=1.24.0,<2.0",
+    "loguru>=0.7.2",
+    "easyocr>=1.7.2",
+    "pydantic>=2.5.0",
+    "pillow>=10.1.0",
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mnijonshuti/smart-match"
+Documentation = "https://github.com/mnijonshuti/smart-match#readme"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint.per-file-ignores]
+"app/services/llm_extraction.py" = ["E501"]
+"app/services/extraction.py" = ["E501"]

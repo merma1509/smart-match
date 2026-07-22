@@ -16,26 +16,35 @@ References:
     [3] HSV color segmentation for stamp detection
 """
 
+
 import cv2
 import numpy as np
 from loguru import logger
-from typing import Any
-
 
 # ── Constants ──
 ELEMENT_TYPES = [
-    "table", "record_block", "header_row", "data_row", "data_cell",
-    "text_block", "marginal_note", "stamp", "signature",
-    "page_number", "decorative", "empty",
+    "table",
+    "record_block",
+    "header_row",
+    "data_row",
+    "data_cell",
+    "text_block",
+    "marginal_note",
+    "stamp",
+    "signature",
+    "page_number",
+    "decorative",
+    "empty",
 ]
 
-TABLE_LINE_THRESHOLD = 200    # HoughLines threshold
-MIN_ROW_HEIGHT = 20           # Minimum row height in pixels
-MIN_COL_WIDTH = 30            # Minimum column width in pixels
-PROJECTION_THRESHOLD = 0.08   # Row detection sensitivity
+TABLE_LINE_THRESHOLD = 200  # HoughLines threshold
+MIN_ROW_HEIGHT = 20  # Minimum row height in pixels
+MIN_COL_WIDTH = 30  # Minimum column width in pixels
+PROJECTION_THRESHOLD = 0.08  # Row detection sensitivity
 
 
 # ── Helper ──
+
 
 def _to_gray(image: np.ndarray) -> np.ndarray:
     """Convert BGR to grayscale if needed."""
@@ -103,113 +112,115 @@ class LayoutDetector:
             "num_rows": len(rows),
             "num_cols": len(cols),
         }
-    
+
     def detect_table_boundaries_from_raw(self, gray_raw: np.ndarray) -> dict:
         """Detect table grid using Otsu on RAW (non-illumination-normalized) gray.
-        
+
         Uses the original grayscale BEFORE illumination normalization,
         because that step destroys thin table lines.
         """
         h, w = gray_raw.shape
-        
+
         # Otsu thresholding on the raw image — table lines are still visible
         _, binary = cv2.threshold(gray_raw, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
+
         # Morphological open to extract horizontal lines (≥50px long)
         h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
         h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-        
+
         # Morphological open to extract vertical lines (≥50px tall)
         v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
         v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
-        
+
         # Horizontal projection
         h_proj = np.sum(h_lines > 0, axis=1) / 255.0
         h_proj = h_proj / max(np.max(h_proj), 1)
-        
+
         # Vertical projection
         v_proj = np.sum(v_lines > 0, axis=0) / 255.0
         v_proj = v_proj / max(np.max(v_proj), 1)
-        
+
         # Detect rows
         rows = self._projection_to_segments(h_proj, threshold=0.08, min_length=15)
-        
+
         # Detect columns
         cols = self._projection_to_segments(v_proj, threshold=0.05, min_length=30)
-        
+
         # Fallback to line-based detection
         if len(rows) < 3:
             rows = self._detect_rows_from_lines(h_lines, gray_raw.shape)
         if len(cols) < 2:
             cols = self._detect_cols_from_lines(v_lines, gray_raw.shape)
-        
+
         return {
             "rows": rows,
             "columns": cols,
             "num_rows": len(rows),
             "num_cols": len(cols),
         }
-    
+
     def detect_table_robust(self, image: np.ndarray, gray_raw: np.ndarray = None) -> dict:
         """ROBUST table detection — works on original image or raw grayscale.
-        
+
         Uses multiple strategies and picks the best result:
         1. Try morphological on raw gray (if available)
         2. Try HSV color filtering (tables often have printed blue/purple headers)
         3. Try adaptive thresholding
         4. Fallback: treat whole page as one big table with 2 columns
-        
+
         Returns unified table_info dict.
         """
         # Strategy 1: Use raw gray if available
         if gray_raw is not None:
             result = self.detect_table_boundaries_from_raw(gray_raw)
             if result["num_rows"] >= 2 and result["num_cols"] >= 2:
-                logger.info(f"Table found via raw Otsu: {result['num_rows']}r x {result['num_cols']}c")
+                logger.info(
+                    f"Table found via raw Otsu: {result['num_rows']}r x {result['num_cols']}c"
+                )
                 return result
-        
+
         # Strategy 2: Try on preprocessed gray
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
             gray = image
-        
+
         # Try with different Canny thresholds
         for low, high in [(20, 80), (30, 100), (50, 150)]:
             edges = cv2.Canny(gray, low, high)
-            
+
             # Horizontal lines
             h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
             h_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, h_kernel)
             h_proj = np.sum(h_lines > 0, axis=1).astype(float)
             h_proj = h_proj / max(np.max(h_proj), 1)
-            
+
             # Vertical lines
             v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
             v_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, v_kernel)
             v_proj = np.sum(v_lines > 0, axis=0).astype(float)
             v_proj = v_proj / max(np.max(v_proj), 1)
-            
+
             # Detect rows and columns with lower thresholds
             rows = self._projection_to_segments(h_proj, threshold=0.05, min_length=10)
             cols = self._projection_to_segments(v_proj, threshold=0.03, min_length=20)
-            
+
             if len(rows) >= 2 and len(cols) >= 2:
                 logger.info(f"Table found via Canny({low},{high}): {len(rows)}r x {len(cols)}c")
                 return {"rows": rows, "columns": cols, "num_rows": len(rows), "num_cols": len(cols)}
-        
+
         # Strategy 3: Force table detection — split page into logical regions
         h, w = gray.shape
-        
+
         # Use projection profiles to find text lines (NOT table lines)
         # In metrical books, text is organized in columns even without visible lines
         bin_inv = cv2.bitwise_not(gray)
         _, binary = cv2.threshold(bin_inv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
+
         # Horizontal projection of text
         h_proj = np.sum(binary > 0, axis=1).astype(float)
         h_proj = h_proj / max(np.max(h_proj), 1)
-        
+
         # Find rows where text exists
         text_rows = []
         in_row = False
@@ -224,11 +235,11 @@ class LayoutDetector:
                 in_row = False
         if in_row and len(h_proj) - start > 5:
             text_rows.append((start, len(h_proj)))
-        
+
         # Also try to find column-like structures via vertical projection
         v_proj = np.sum(binary > 0, axis=0).astype(float)
         v_proj = v_proj / max(np.max(v_proj), 1)
-        
+
         text_cols = []
         in_col = False
         start = 0
@@ -242,7 +253,7 @@ class LayoutDetector:
                 in_col = False
         if in_col and len(v_proj) - start > 30:
             text_cols.append((start, len(v_proj)))
-        
+
         if len(text_rows) >= 3 and len(text_cols) >= 1:
             logger.info(f"Table forced via text projection: {len(text_rows)}r x {len(text_cols)}c")
             return {
@@ -251,7 +262,7 @@ class LayoutDetector:
                 "num_rows": len(text_rows),
                 "num_cols": max(len(text_cols), 1),
             }
-        
+
         # Strategy 4: Ultimate fallback — treat as single-column table
         logger.info("No table found, using page as single region")
         return {
@@ -260,7 +271,7 @@ class LayoutDetector:
             "num_rows": max(len(text_rows), 1),
             "num_cols": 1,
         }
-    
+
     def _projection_to_segments(self, proj: np.ndarray, threshold: float, min_length: int) -> list:
         """Convert projection profile to list of (start, end) segments."""
         segments = []
@@ -290,7 +301,9 @@ class LayoutDetector:
         v_th = shape[0] * 0.25
         return self._detect_line_positions(v_sum, v_th, min_gap=30, shape_max=shape[1])
 
-    def _detect_line_positions(self, profile: np.ndarray, threshold: float, min_gap: int, shape_max: int) -> list:
+    def _detect_line_positions(
+        self, profile: np.ndarray, threshold: float, min_gap: int, shape_max: int
+    ) -> list:
         """Generic line position detection from projection profile."""
         positions = []
         in_line = False
@@ -317,30 +330,30 @@ class LayoutDetector:
     def _is_table_page(self, gray: np.ndarray, table_info: dict) -> bool:
         """Relaxed table page detection for metrical books."""
         h, w = gray.shape
-        
+
         # 1. Check row/column count — relaxed
         if table_info["num_rows"] < 2:
             return False
-        
+
         # 2. Check if rows cover a significant portion — relaxed to 20%
         rows = table_info["rows"]
         total_row_area = sum(y2 - y1 for y1, y2 in rows)
         row_coverage = total_row_area / h if h > 0 else 0
         if row_coverage < 0.2:
             return False
-        
+
         # 3. Line density check — only if we have enough rows
         if table_info["num_rows"] >= 3 and table_info["num_cols"] >= 1:
             return True
-        
+
         # 4. For pages with at least 2 rows — assume it's tabular if rows are regular
         if table_info["num_rows"] >= 4:
             return True
-        
+
         # 5. Default: if we have rows and at least some structure
         if table_info["num_rows"] >= 2:
             return True
-        
+
         return False
 
     def _table_confidence(self, table_info: dict) -> float:
@@ -371,19 +384,21 @@ class LayoutDetector:
                     continue
                 is_empty = np.mean(cell_img) > 250
                 cell_type = self.classify_region(cell_img)
-                cells.append({
-                    "type": "data_cell",
-                    "bbox": (cx1, ry1, cx2, ry2),
-                    "confidence": 0.0 if is_empty else (0.8 if cell_type != "empty" else 0.3),
-                    "source": "table_grid",
-                    "properties": {
-                        "row": ri,
-                        "col": ci,
-                        "is_header": ri == 0 or ci == 0,
-                        "region_type": cell_type,
-                        "is_empty": is_empty,
+                cells.append(
+                    {
+                        "type": "data_cell",
+                        "bbox": (cx1, ry1, cx2, ry2),
+                        "confidence": 0.0 if is_empty else (0.8 if cell_type != "empty" else 0.3),
+                        "source": "table_grid",
+                        "properties": {
+                            "row": ri,
+                            "col": ci,
+                            "is_header": ri == 0 or ci == 0,
+                            "region_type": cell_type,
+                            "is_empty": is_empty,
+                        },
                     }
-                })
+                )
         return cells
 
     # ── 4. Text Block Detection (for non-table pages) ──
@@ -413,16 +428,18 @@ class LayoutDetector:
 
             # Text blocks are typically wider than tall
             if 0.5 < aspect < 10 and ch > 15:
-                text_blocks.append({
-                    "type": "text_block",
-                    "bbox": (x, y, x + cw, y + ch),
-                    "confidence": min(0.8, area / (h * w) * 10),
-                    "source": "contour_analysis",
-                    "properties": {
-                        "area": int(area),
-                        "aspect_ratio": round(aspect, 2),
+                text_blocks.append(
+                    {
+                        "type": "text_block",
+                        "bbox": (x, y, x + cw, y + ch),
+                        "confidence": min(0.8, area / (h * w) * 10),
+                        "source": "contour_analysis",
+                        "properties": {
+                            "area": int(area),
+                            "aspect_ratio": round(aspect, 2),
+                        },
                     }
-                })
+                )
 
         return text_blocks
 
@@ -446,13 +463,15 @@ class LayoutDetector:
 
             # First row is typically the header
             if not header_done:
-                blocks.append({
-                    "type": "header_row",
-                    "bbox": (0, y1, gray.shape[1], y2),
-                    "confidence": 0.9,
-                    "source": "position",
-                    "properties": {"row_index": i, "is_header": True}
-                })
+                blocks.append(
+                    {
+                        "type": "header_row",
+                        "bbox": (0, y1, gray.shape[1], y2),
+                        "confidence": 0.9,
+                        "source": "position",
+                        "properties": {"row_index": i, "is_header": True},
+                    }
+                )
                 header_done = True
                 prev_height = height
                 continue
@@ -478,16 +497,18 @@ class LayoutDetector:
             return
         block_y1 = current_block[0][0]
         block_y2 = current_block[-1][1]
-        blocks.append({
-            "type": "record_block",
-            "bbox": (0, block_y1, gray.shape[1], block_y2),
-            "confidence": 0.8,
-            "source": "row_clustering",
-            "properties": {
-                "row_count": len(current_block),
-                "record_type": "unknown",
+        blocks.append(
+            {
+                "type": "record_block",
+                "bbox": (0, block_y1, gray.shape[1], block_y2),
+                "confidence": 0.8,
+                "source": "row_clustering",
+                "properties": {
+                    "row_count": len(current_block),
+                    "record_type": "unknown",
+                },
             }
-        })
+        )
 
     # ── 6. Region Classification ──
     def classify_region(self, cell_img: np.ndarray) -> str:
@@ -529,10 +550,12 @@ class LayoutDetector:
 
         for color_name, mask in [("red", red_mask), ("blue", blue_mask)]:
             # Clean mask
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+            mask = cv2.morphologyEx(
+                mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            )
+            mask = cv2.morphologyEx(
+                mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            )
 
             # Find contours
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -547,17 +570,19 @@ class LayoutDetector:
 
                 x, y, cw, ch = cv2.boundingRect(cnt)
                 if circularity > 0.5 or (0.7 < cw / ch < 1.3 and cw > 20):
-                    stamps.append({
-                        "type": "stamp",
-                        "bbox": (x, y, x + cw, y + ch),
-                        "confidence": round(min(0.9, 0.4 + circularity / 2), 2),
-                        "source": "color_detection",
-                        "properties": {
-                            "color": color_name,
-                            "circularity": round(circularity, 2),
-                            "area": int(area),
+                    stamps.append(
+                        {
+                            "type": "stamp",
+                            "bbox": (x, y, x + cw, y + ch),
+                            "confidence": round(min(0.9, 0.4 + circularity / 2), 2),
+                            "source": "color_detection",
+                            "properties": {
+                                "color": color_name,
+                                "circularity": round(circularity, 2),
+                                "area": int(area),
+                            },
                         }
-                    })
+                    )
 
         return stamps
 
@@ -578,7 +603,7 @@ class LayoutDetector:
         margin_width = int(w * 0.04)  # Narrow margin — 4% of page width
 
         for region_name, x_start in [("left_margin", 0), ("right_margin", w - margin_width)]:
-            margin = gray[:, x_start:x_start + margin_width]
+            margin = gray[:, x_start : x_start + margin_width]
 
             # Skip nearly empty margins early
             if np.mean(margin) > 250:
@@ -609,17 +634,19 @@ class LayoutDetector:
                 # cw > 20: wider than a single character
                 # ch * cw > 800: minimum area to be considered a real note
                 if ch > 40 and cw > 20 and ch * cw > 800:
-                    notes.append({
-                        "type": "marginal_note",
-                        "bbox": (x_start + cx, cy, x_start + cx + cw, cy + ch),
-                        "confidence": round(min(0.8, 0.3 + content_density), 2),
-                        "source": "heuristic",
-                        "properties": {
-                            "region": region_name,
-                            "height": ch,
-                            "width": cw,
+                    notes.append(
+                        {
+                            "type": "marginal_note",
+                            "bbox": (x_start + cx, cy, x_start + cx + cw, cy + ch),
+                            "confidence": round(min(0.8, 0.3 + content_density), 2),
+                            "source": "heuristic",
+                            "properties": {
+                                "region": region_name,
+                                "height": ch,
+                                "width": cw,
+                            },
                         }
-                    })
+                    )
 
         return notes
 
@@ -630,7 +657,7 @@ class LayoutDetector:
         Adapted from [1] assign_record_type().
         """
         # Check header region for content density to determine record type
-        header = gray[:int(gray.shape[0] * 0.2), :]
+        header = gray[: int(gray.shape[0] * 0.2), :]
         header_density = np.mean(header < 128)
 
         detected_type = "unknown"
@@ -660,11 +687,11 @@ class LayoutDetector:
         page_numbers = []
 
         # Check top margin
-        top_strip = gray[:int(h * 0.08), :]
+        top_strip = gray[: int(h * 0.08), :]
         top_density = np.mean(top_strip < 128)
 
         # Check bottom margin
-        bottom_strip = gray[int(h * 0.92):, :]
+        bottom_strip = gray[int(h * 0.92) :, :]
         bottom_density = np.mean(bottom_strip < 128)
 
         for region_name, strip, density in [
@@ -678,13 +705,15 @@ class LayoutDetector:
                     cx, cy, cw, ch = cv2.boundingRect(cnt)
                     if 10 < cw < 100 and 10 < ch < 50:
                         y_offset = 0 if region_name == "top_margin" else int(h * 0.92)
-                        page_numbers.append({
-                            "type": "page_number",
-                            "bbox": (cx, y_offset + cy, cx + cw, y_offset + cy + ch),
-                            "confidence": 0.6,
-                            "source": "heuristic",
-                            "properties": {"region": region_name}
-                        })
+                        page_numbers.append(
+                            {
+                                "type": "page_number",
+                                "bbox": (cx, y_offset + cy, cx + cw, y_offset + cy + ch),
+                                "confidence": 0.6,
+                                "source": "heuristic",
+                                "properties": {"region": region_name},
+                            }
+                        )
 
         return page_numbers
 
@@ -695,7 +724,7 @@ class LayoutDetector:
         signatures = []
 
         # Signatures typically appear in the bottom-right of record blocks
-        bottom_strip = gray[int(h * 0.85):int(h * 0.95), int(w * 0.5):]
+        bottom_strip = gray[int(h * 0.85) : int(h * 0.95), int(w * 0.5) :]
         if bottom_strip.size == 0:
             return signatures
 
@@ -709,21 +738,29 @@ class LayoutDetector:
                 cx, cy, cw, ch = cv2.boundingRect(cnt)
                 area = cv2.contourArea(cnt)
                 if cw > 50 and ch > 15 and area > 300:
-                    signatures.append({
-                        "type": "signature",
-                        "bbox": (int(w * 0.5) + cx, int(h * 0.85) + cy,
-                                int(w * 0.5) + cx + cw, int(h * 0.85) + cy + ch),
-                        "confidence": 0.5,
-                        "source": "heuristic",
-                        "properties": {}
-                    })
+                    signatures.append(
+                        {
+                            "type": "signature",
+                            "bbox": (
+                                int(w * 0.5) + cx,
+                                int(h * 0.85) + cy,
+                                int(w * 0.5) + cx + cw,
+                                int(h * 0.85) + cy + ch,
+                            ),
+                            "confidence": 0.5,
+                            "source": "heuristic",
+                            "properties": {},
+                        }
+                    )
 
         return signatures
 
     # ── Main Pipeline ──
-    def process(self, image: np.ndarray, gray_raw: np.ndarray = None, visualize: bool = False) -> dict:
+    def process(
+        self, image: np.ndarray, gray_raw: np.ndarray = None, visualize: bool = False
+    ) -> dict:
         """Complete layout analysis pipeline.
-        
+
         Args:
             image: Light-preprocessed BGR image (from light_preprocess()).
             gray_raw: Optional raw grayscale image (before illumination normalization).
@@ -732,7 +769,7 @@ class LayoutDetector:
         gray = _to_gray(image)
         h, w = image.shape[:2]
         all_elements = []
-        
+
         # 1. Table detection — use raw gray if available (preserves thin table lines)
         if gray_raw is not None:
             table_info = self.detect_table_boundaries_from_raw(gray_raw)
@@ -744,7 +781,9 @@ class LayoutDetector:
 
         if is_table:
             # ── Table page: detect table, cells, record blocks ──
-            logger.info(f"Detected TABLE page: {table_info['num_rows']}r x {table_info['num_cols']}c")
+            logger.info(
+                f"Detected TABLE page: {table_info['num_rows']}r x {table_info['num_cols']}c"
+            )
 
             # Table boundary
             boundary = {
@@ -754,8 +793,8 @@ class LayoutDetector:
                 "source": "projection",
                 "properties": {
                     "num_rows": table_info["num_rows"],
-                    "num_cols": table_info["num_cols"]
-                }
+                    "num_cols": table_info["num_cols"],
+                },
             }
             all_elements.append(boundary)
 
@@ -772,12 +811,10 @@ class LayoutDetector:
                 "cells": len(cells),
                 "record_blocks": len([e for e in all_elements if e["type"] == "record_block"]),
                 "handwritten_cells": sum(
-                    1 for c in cells
-                    if c["properties"].get("region_type") == "handwritten"
+                    1 for c in cells if c["properties"].get("region_type") == "handwritten"
                 ),
                 "printed_cells": sum(
-                    1 for c in cells
-                    if c["properties"].get("region_type") == "printed"
+                    1 for c in cells if c["properties"].get("region_type") == "printed"
                 ),
             }
         else:
@@ -787,16 +824,18 @@ class LayoutDetector:
             text_blocks = self.detect_text_blocks(gray)
 
             # Add a single text_page marker
-            all_elements.append({
-                "type": "text_block",
-                "bbox": (0, 0, w, h),
-                "confidence": 0.8,
-                "source": "page_classification",
-                "properties": {
-                    "page_type": "text",
-                    "num_blocks": len(text_blocks),
+            all_elements.append(
+                {
+                    "type": "text_block",
+                    "bbox": (0, 0, w, h),
+                    "confidence": 0.8,
+                    "source": "page_classification",
+                    "properties": {
+                        "page_type": "text",
+                        "num_blocks": len(text_blocks),
+                    },
                 }
-            })
+            )
             all_elements.extend(text_blocks)
 
             cells = []  # No cells on text pages
@@ -841,8 +880,8 @@ class LayoutDetector:
                     "page_numbers": len(page_numbers),
                     "signatures": len(signatures),
                     "text_blocks": len([e for e in all_elements if e["type"] == "text_block"]),
-                }
-            }
+                },
+            },
         }
 
         logger.info(

@@ -1,7 +1,8 @@
 # Defines the death record output structure
+
 from pydantic import BaseModel
-from typing import Optional
-from app.schemas.common import FieldPrediction, NameResolution, ExtractionMetadata
+
+from app.schemas.common import ExtractionMetadata, FieldPrediction, NameResolution
 
 
 class DeathRecord(BaseModel):
@@ -9,15 +10,15 @@ class DeathRecord(BaseModel):
     deceased_name: FieldPrediction
     death_date: FieldPrediction
     burial_date: FieldPrediction
-    age: Optional[FieldPrediction] = None
+    age: FieldPrediction | None = None
     needs_review: bool = False
-    
+
     # Optional resolved entities
-    deceased_name_resolved: Optional[NameResolution] = None
-    
+    deceased_name_resolved: NameResolution | None = None
+
     # Optional computed fields
-    age_computed: Optional[dict] = None
-    age_validation: Optional[dict] = None
-    
+    age_computed: dict | None = None
+    age_validation: dict | None = None
+
     # Metadata
-    _extraction: Optional[ExtractionMetadata] = None
+    _extraction: ExtractionMetadata | None = None
