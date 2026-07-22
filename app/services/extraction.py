@@ -63,9 +63,7 @@ class InformationExtractor:
         if self._llm_extractor is None:
             try:
                 from app.services.llm_extraction import LLMAssistedExtractor
-                self._llm_extractor = LLMAssistedExtractor(
-                    confidence_threshold=settings.ocr_confidence_threshold,
-                )
+                self._llm_extractor = LLMAssistedExtractor()
                 logger.info("LLM extractor loaded")
             except Exception as e:
                 logger.warning(f"LLM extractor not available: {e}")
