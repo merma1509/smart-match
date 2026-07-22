@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.core.config import settings
+from app.services.entity_resolution import resolve_entities
 from app.services.extraction import extract_information
 from app.services.layout import analyze_layout
 from app.services.light_preprocess import light_preprocess
@@ -44,7 +45,9 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
     logger.info(f"[{request_id}] Image: {image.shape}")
 
     # 1. Preprocess
-    preprocessed, metrics = light_preprocess(image, max_dim=settings.max_image_dimension, return_metrics=True)
+    preprocessed, metrics = light_preprocess(
+        image, max_dim=settings.max_image_dimension, return_metrics=True
+    )
 
     # 2. Layout analysis
     gray_raw = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -73,12 +76,17 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
     full_text = "\n".join(texts)
     logger.info(f"[{request_id}] OCR text length: {len(full_text)} chars")
 
-    # 4. Postprocess and extract
+    # 4. Postprocess
     postprocessed = postprocess_ocr_text(full_text)
     corrected_text = postprocessed["corrected_text"]
+
+    # 5. Extract information
     extracted = extract_information(corrected_text)
 
-    # 5. Build result
+    # 6. Entity resolution (normalize names, resolve dates, compute age)
+    resolved = resolve_entities(extracted)
+
+    # 7. Build result
     elapsed = round(time.time() - start_time, 2)
     result = {
         "request_id": request_id,
@@ -89,11 +97,12 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
         "page_type": layout["page_type"],
         "num_elements": len(layout["elements"]),
         "extracted_data": extracted,
+        "resolved_data": resolved,
         "raw_text_preview": full_text[:500],
         "needs_review": extracted.get("needs_review", True),
     }
 
-    # 6. Save result
+    # 8. Save result
     result_path = RESULTS_DIR / f"{request_id}.json"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(result_path, "w", encoding="utf-8") as f:

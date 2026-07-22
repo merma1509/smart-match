@@ -13,7 +13,7 @@ if echo "$RESP" | grep -q "Smart Match"; then
   echo "   [COMPLETED] Root endpoint works"
   ((PASS++))
 else
-  echo "   [FAILED] Root endpoint failed"
+  echo "   [FAILED] Root endpoint failed: $RESP"
   ((FAIL++))
 fi
 
@@ -21,10 +21,10 @@ fi
 echo "2. GET /health"
 RESP=$(curl -s $BASE/health)
 if echo "$RESP" | grep -q "healthy"; then
-  echo "  [COMPLETED] Health check passed"
+  echo "   [COMPLETED] Health check passed"
   ((PASS++))
 else
-  echo "   [FAILED] Health check failed"
+  echo "   [FAILED] Health check failed: $RESP"
   ((FAIL++))
 fi
 
@@ -43,11 +43,10 @@ echo "3. POST /extract"
 RESP=$(curl -s -X POST $BASE/extract -F "file=@test_input.jpg")
 ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('request_id','?'))" 2>/dev/null)
 if [ "$ID" != "?" ]; then
-  echo "  [COMPLETED] Extract endpoint works (ID: $ID)"
+  echo "   [COMPLETED] Extract endpoint works (ID: $ID)"
   ((PASS++))
 else
-  echo "   [FAILED] Extract endpoint failed"
-  echo "$RESP"
+  echo "   [FAILED] Extract endpoint failed: $(echo $RESP | head -c 200)"
   ((FAIL++))
 fi
 
@@ -56,11 +55,10 @@ echo "4. POST /extract/batch"
 RESP=$(curl -s -X POST $BASE/extract/batch -F "files=@test_input.jpg" -F "files=@test_input.jpg")
 TOTAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null)
 if [ "$TOTAL" = "2" ]; then
-  echo "  [COMPLETED] Batch endpoint works (processed $TOTAL)"
+  echo "   [COMPLETED] Batch endpoint works (processed $TOTAL)"
   ((PASS++))
 else
-  echo "   [FAILED] Batch endpoint failed"
-  echo "$RESP"
+  echo "   [FAILED] Batch endpoint failed: $(echo $RESP | head -c 200)"
   ((FAIL++))
 fi
 
@@ -69,10 +67,10 @@ echo "5. GET /results"
 RESP=$(curl -s "$BASE/results/?limit=5&offset=0")
 TOTAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total','?'))" 2>/dev/null)
 if [ "$TOTAL" != "?" ]; then
-  echo "  [COMPLETED] List results works (total: $TOTAL)"
+  echo "   [COMPLETED] List results works (total: $TOTAL)"
   ((PASS++))
 else
-  echo "   [FAILED] List results failed"
+  echo "   [FAILED] List results failed: $(echo $RESP | head -c 200)"
   ((FAIL++))
 fi
 
@@ -80,10 +78,10 @@ fi
 echo "6. GET /results/$ID"
 RESP=$(curl -s "$BASE/results/$ID")
 if echo "$RESP" | grep -q "request_id"; then
-  echo "  [COMPLETED] Get result by ID works"
+  echo "   [COMPLETED] Get result by ID works"
   ((PASS++))
 else
-  echo "   [FAILED] Get result by ID failed"
+  echo "   [FAILED] Get result by ID failed: $(echo $RESP | head -c 200)"
   ((FAIL++))
 fi
 
@@ -91,10 +89,10 @@ fi
 echo "7. DELETE /results/$ID"
 RESP=$(curl -s -X DELETE "$BASE/results/$ID")
 if echo "$RESP" | grep -q "deleted"; then
-  echo "  [COMPLETED] Delete result works"
+  echo "   [COMPLETED] Delete result works"
   ((PASS++))
 else
-  echo "   [FAILED] Delete result failed"
+  echo "   [FAILED] Delete result failed: $(echo $RESP | head -c 200)"
   ((FAIL++))
 fi
 

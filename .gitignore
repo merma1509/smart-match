@@ -23,6 +23,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+.DS_Store/
 
 # Project specific
 data/
@@ -31,6 +32,8 @@ uploads/*
 results/*.json
 *.pt
 *.pkl
+*.png
+*.jpg
 
 # Docker
 .dockerignore
