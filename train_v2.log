@@ -1,0 +1,10 @@
+/opt/homebrew/Caskroom/miniforge/base/envs/ai_sec/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+2026-07-28 20:26:54.242 | INFO     | __main__:train:86 - Loading data from /Users/mnijonshuti/smart-match/finetune_data
+2026-07-28 20:26:54.300 | INFO     | __main__:train:94 - Train: 45000, Val: 5000
+2026-07-28 20:26:54.324 | INFO     | __main__:train:98 - Loading taiga75/ru-trocr-1700s on mps
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+2026-07-28 20:27:00.560 | INFO     | __main__:train:112 - Light mode: encoder frozen, decoder=247.3M params
+2026-07-28 20:27:00.564 | INFO     | __main__:train:140 - Training: 5 epochs, 14065 steps, lr=5e-05
+Epoch 1:   0%|          | 0/2813 [00:00<?, ?it/s]`loss_type=None` was set in the config but it is unrecognised.Using the default loss: `ForCausalLMLoss`.
+Epoch 1:   0%|          | 0/2813 [00:10<?, ?it/s, loss=11.2538]Epoch 1:   0%|          | 1/2813 [00:10<7:53:22, 10.10s/it, loss=11.2538]

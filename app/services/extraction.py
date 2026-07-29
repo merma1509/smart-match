@@ -14,10 +14,16 @@ class InformationExtractor:
     def __init__(self):
         # ── Russian date patterns ──
         self.date_patterns = [
-            (r"(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|"
-             r"июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})(?:\s+года)?", "ru_dmy"),
-            (r"(\d{1,2})\s+(генваря|февраля|марта|апреля|маiя|июня|"
-             r"июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})", "ru_old"),
+            (
+                r"(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|"
+                r"июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})(?:\s+года)?",
+                "ru_dmy",
+            ),
+            (
+                r"(\d{1,2})\s+(генваря|февраля|марта|апреля|маiя|июня|"
+                r"июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})",
+                "ru_old",
+            ),
             (r"(\d{1,2})\s*[.\s]\s*(I{1,3}|IV|V|VI{0,3}|IX|X[I]?)\s*[.\s]\s*(\d{4})", "roman"),
             (r"(\d{1,2})[./-](\d{1,2})[./-](\d{4})", "numeric"),
             (r"(\d{4})-(\d{2})-(\d{2})", "iso"),
@@ -25,32 +31,73 @@ class InformationExtractor:
 
         self.record_indicators = {
             "birth": [
-                ("родился", 4), ("родилась", 4), ("род", 3),
-                ("крещён", 3), ("крещена", 3), ("крещение", 2),
-                ("рождение", 2), ("рожд", 2), ("сын", 1), ("дочь", 1),
+                ("родился", 4),
+                ("родилась", 4),
+                ("род", 3),
+                ("крещён", 3),
+                ("крещена", 3),
+                ("крещение", 2),
+                ("рождение", 2),
+                ("рожд", 2),
+                ("сын", 1),
+                ("дочь", 1),
             ],
             "death": [
-                ("умер", 4), ("умерла", 4), ("скончался", 3),
-                ("скончалась", 3), ("погребён", 2), ("погребена", 2),
-                ("похоронен", 2), ("смерть", 2), ("возраст", 1), ("лет", 1),
+                ("умер", 4),
+                ("умерла", 4),
+                ("скончался", 3),
+                ("скончалась", 3),
+                ("погребён", 2),
+                ("погребена", 2),
+                ("похоронен", 2),
+                ("смерть", 2),
+                ("возраст", 1),
+                ("лет", 1),
             ],
             "marriage": [
-                ("венчался", 4), ("венчалась", 4), ("брак", 3),
-                ("бракосочетание", 3), ("жених", 2), ("невеста", 2),
-                ("супруг", 2), ("супруга", 2), ("муж", 1), ("жена", 1),
+                ("венчался", 4),
+                ("венчалась", 4),
+                ("брак", 3),
+                ("бракосочетание", 3),
+                ("жених", 2),
+                ("невеста", 2),
+                ("супруг", 2),
+                ("супруга", 2),
+                ("муж", 1),
+                ("жена", 1),
             ],
         }
 
         self.roman_map = {
-            "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6,
-            "VII": 7, "VIII": 8, "IX": 9, "X": 10, "XI": 11, "XII": 12,
+            "I": 1,
+            "II": 2,
+            "III": 3,
+            "IV": 4,
+            "V": 5,
+            "VI": 6,
+            "VII": 7,
+            "VIII": 8,
+            "IX": 9,
+            "X": 10,
+            "XI": 11,
+            "XII": 12,
         }
 
         self.month_map = {
-            "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
-            "мая": 5, "июня": 6, "июля": 7, "августа": 8,
-            "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
-            "генваря": 1, "маiя": 5,
+            "января": 1,
+            "февраля": 2,
+            "марта": 3,
+            "апреля": 4,
+            "мая": 5,
+            "июня": 6,
+            "июля": 7,
+            "августа": 8,
+            "сентября": 9,
+            "октября": 10,
+            "ноября": 11,
+            "декабря": 12,
+            "генваря": 1,
+            "маiя": 5,
         }
 
         # LLM extractor (lazy init)
@@ -63,6 +110,7 @@ class InformationExtractor:
         if self._llm_extractor is None:
             try:
                 from app.services.llm_extraction import LLMAssistedExtractor
+
                 self._llm_extractor = LLMAssistedExtractor()
                 logger.info("LLM extractor loaded")
             except Exception as e:
@@ -119,7 +167,7 @@ class InformationExtractor:
         idx = text_lower.find(keyword)
         if idx == -1:
             return "Unknown"
-        after = text[idx + len(keyword):].strip()
+        after = text[idx + len(keyword) :].strip()
         # Take up to next punctuation or line break
         name_match = re.match(r"([А-Яа-яЁё\s\-]+)", after)
         if name_match:
@@ -240,19 +288,21 @@ class InformationExtractor:
         if date != "Unknown":
             result["marriage_date"] = {"value": date, "confidence": 0.8}
 
-        logger.debug(f"Extracted marriage: {result['groom_name']['value']} & {result['bride_name']['value']}")
+        logger.debug(
+            f"Extracted marriage: {result['groom_name']['value']} & {result['bride_name']['value']}"
+        )
         return result
 
     def extract(self, text: str, force_llm: bool = False) -> dict:
         """Extract structured data from OCR text.
-        
+
         Strategy:
         1. Detect record type (birth/death/marriage)
         2. Run rule-based extraction
         3. If confidence is low, try LLM fallback
         4. Merge results
         5. Compute metadata
-        
+
         Returns:
             dict with extracted fields and metadata
         """
@@ -332,12 +382,12 @@ class InformationExtractor:
 
 def extract_information(text: str, force_llm: bool = False, **kwargs) -> dict:
     """Quick extraction of information from OCR text.
-    
+
     Args:
         text: Post-processed OCR text
         force_llm: Force LLM usage even if rule-based confidence is high
         **kwargs: Additional arguments
-        
+
     Returns:
         dict with extracted fields
     """

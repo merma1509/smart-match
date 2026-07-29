@@ -1,19 +1,17 @@
-# app/services/ocr.py
-"""OCR — Russian text recognition.
-Primary: EasyOCR for Russian text
-Fallback: Tesseract for clean printed text
-"""
-
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import subprocess
 import tempfile
+from pathlib import Path
 
 import cv2
 import numpy as np
 from loguru import logger
+
+from app.core.config import settings
 
 # Try EasyOCR
 try:
@@ -24,20 +22,100 @@ except ImportError:
     EASYOCR_AVAILABLE = False
     logger.warning("EasyOCR not installed. Run: pip install easyocr")
 
+# Try fine-tuned TrOCR
+try:
+    import torch
+    from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+
+    TROCR_AVAILABLE = True
+except ImportError:
+    TROCR_AVAILABLE = False
+    logger.warning("transformers/torch not installed. TrOCR unavailable.")
+
+# ── Path to fine-tuned model ──
+FINETUNED_TROCR_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "app" / "models" / "ocr" / "fine_tuned_trocr"
+)
+
 
 class OCREngine:
     _easyocr_reader = None
+    _trocr_processor = None
+    _trocr_model = None
+    _trocr_device = None
 
     @classmethod
-    def get_easyocr(cls):
+    def get_trocr(cls):
+        """Lazy-load fine-tuned TrOCR model."""
+        if cls._trocr_model is not None:
+            return cls._trocr_processor, cls._trocr_model
+        if not TROCR_AVAILABLE:
+            return None, None
+        model_path = FINETUNED_TROCR_PATH
+        if not model_path.exists() or not (list(model_path.glob("*.safetensors")) or list(model_path.glob("*.bin"))):
+            logger.info(f"Fine-tuned model not found, using base: {settings.ocr_model_name}")
+            model_path_str = settings.ocr_model_name
+        else:
+            model_path_str = str(model_path)
+        try:
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            logger.info(f"Loading TrOCR from {model_path_str} on {device}...")
+            cls._trocr_processor = TrOCRProcessor.from_pretrained(model_path_str)
+            cls._trocr_model = VisionEncoderDecoderModel.from_pretrained(model_path_str).to(device)
+            cls._trocr_model.eval()
+            cls._trocr_device = device
+            logger.info(f"TrOCR loaded ({sum(p.numel() for p in cls._trocr_model.parameters())/1e6:.0f}M params)")
+            return cls._trocr_processor, cls._trocr_model
+        except Exception as e:
+            logger.error(f"Failed to load TrOCR: {e}")
+            return None, None
+
+    @classmethod
+    def get_easyocr(cls, use_gpu: bool = None):
         if cls._easyocr_reader is None and EASYOCR_AVAILABLE:
-            logger.info("Initializing EasyOCR with Russian...")
-            cls._easyocr_reader = easyocr.Reader(["ru"], gpu=False)
+            gpu = use_gpu if use_gpu is not None else settings.ocr_use_gpu
+            logger.info(f"Initializing EasyOCR with Russian... (gpu={gpu})")
+            cls._easyocr_reader = easyocr.Reader(["ru"], gpu=gpu)
             logger.info("EasyOCR initialized")
         return cls._easyocr_reader
 
     def __init__(self, tesseract_lang: str = "rus"):
         self.tesseract_lang = tesseract_lang
+
+    def recognize_trocr(self, image) -> dict:
+        """Recognize text using fine-tuned TrOCR."""
+        processor, model = self.get_trocr()
+        if processor is None:
+            return {"text": "", "confidence": 0.0, "model_used": "trocr_unavailable"}
+
+        try:
+            if isinstance(image, str):
+                from PIL import Image as PILImage
+                img = PILImage.open(image).convert("RGB")
+            elif isinstance(image, np.ndarray):
+                from PIL import Image as PILImage
+                img = PILImage.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            else:
+                img = image
+
+            pixel_values = processor(img, return_tensors="pt").pixel_values.to(self._trocr_device)
+            with torch.no_grad():
+                gen = model.generate(
+                    pixel_values,
+                    max_length=128,
+                    num_beams=4,
+                    early_stopping=True,
+                )
+            text = processor.batch_decode(gen, skip_special_tokens=True)[0]
+            return {
+                "text": text.strip(),
+                "confidence": 0.8,  # TrOCR doesn't output confidence natively
+                "model_used": "trocr",
+            }
+        except Exception as e:
+            logger.error(f"TrOCR failed: {e}")
+            return {"text": "", "confidence": 0.0, "model_used": "trocr_error"}
 
     def recognize_easyocr(self, image) -> dict:
         reader = self.get_easyocr()
@@ -113,23 +191,45 @@ def get_engine() -> OCREngine:
 
 
 def recognize_text(image, region_type: str = "printed", use_voting: bool = False) -> dict:
+    """Recognize text with primary=TrOCR, secondary=EasyOCR, fallback=Tesseract."""
     engine = get_engine()
+
+    # Primary: TrOCR (handwritten + old print)
+    result = engine.recognize_trocr(image)
+    if result["text"] and result["text"] != "":
+        return result
+
+    # Secondary: EasyOCR
     result = engine.recognize_easyocr(image)
-    if use_voting and result["confidence"] < 0.3:
+    if result["confidence"] >= 0.3:
+        return result
+
+    # Fallback: Tesseract
+    if use_voting:
         tess = engine.recognize_tesseract(image)
         if len(tess.get("text", "")) > len(result.get("text", "")):
-            result = tess
+            return tess
+
     return result
 
 
 def preload_models():
+    """Preload all OCR models on startup."""
+    logger.info("Preloading OCR models...")
+    # EasyOCR
     logger.info("Preloading EasyOCR...")
     OCREngine.get_easyocr()
-    logger.info("EasyOCR preloaded")
+    # TrOCR (lazy-loaded, but we trigger it)
+    logger.info("Preloading TrOCR...")
+    OCREngine.get_trocr()
+    logger.info("All OCR models preloaded")
 
 
 def cleanup_all():
     global _engine
     _engine = None
     OCREngine._easyocr_reader = None
+    OCREngine._trocr_model = None
+    OCREngine._trocr_processor = None
     logger.info("OCR resources freed")
+

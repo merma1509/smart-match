@@ -1,4 +1,5 @@
 """Results endpoints — list, get, delete extraction results."""
+
 import json
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def delete_result(result_id: str):
         raise HTTPException(404, f"Result {result_id} not found")
 
     # Also delete the uploaded file
-    upload_dir = Path(settings.input_dir)
+    upload_dir = Path(settings.upload_dir)
     for ext in [".jpg", ".jpeg", ".png"]:
         upload_path = upload_dir / f"{result_id}{ext}"
         if upload_path.exists():

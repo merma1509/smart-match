@@ -13,7 +13,6 @@ optimized preprocessing based on region type:
 Each function returns a preprocessed grayscale image ready for OCR.
 """
 
-
 import cv2
 import numpy as np
 from loguru import logger

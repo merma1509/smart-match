@@ -1,4 +1,5 @@
 """Health check and root endpoint."""
+
 import os
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from app.core.config import settings
 
 router = APIRouter()
 
-UPLOAD_DIR = Path(settings.input_dir)
+UPLOAD_DIR = Path(settings.upload_dir)
 RESULTS_DIR = Path(settings.output_dir)
 
 

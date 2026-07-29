@@ -20,9 +20,12 @@ import cv2
 import numpy as np
 from loguru import logger
 
+from app.core.config import settings
+
 # ── Constants ──
 MAX_IMAGE_DIMENSION = 3000  # Increased from 2000 for better OCR on small text
 MIN_IMAGE_DIMENSION = 1500  # Upscale very small images
+BORDER_REMOVAL_WIDTH = settings.border_removal_width
 
 
 def _limit_image_size(image: np.ndarray, max_dim: int = MAX_IMAGE_DIMENSION) -> np.ndarray:
@@ -140,7 +143,11 @@ def _deskew_robust(image: np.ndarray) -> np.ndarray:
 def _color_normalize(image: np.ndarray) -> np.ndarray:
     """Color normalization — removes color casts from aged paper.
     Uses gray-world assumption with clipping to avoid over-correction.
+    Handles grayscale input by returning it unchanged.
     """
+    if len(image.shape) == 2:
+        return image
+
     result = image.copy().astype(np.float32)
 
     mean_b = np.mean(result[:, :, 0])
@@ -165,28 +172,43 @@ def _color_normalize(image: np.ndarray) -> np.ndarray:
 def _illumination_normalize(image: np.ndarray) -> np.ndarray:
     """Illumination normalization — removes shadows and uneven lighting.
     Uses large Gaussian blur for background estimation.
+    Handles grayscale input by processing single channel.
     """
-    result = np.zeros_like(image, dtype=np.float32)
     h, w = image.shape[:2]
+    is_gray = len(image.shape) == 2
 
     # Adaptive kernel size: larger for bigger images
     kernel_size = max(61, (min(h, w) // 8) | 1)
 
-    for c in range(3):
-        channel = image[:, :, c].astype(np.float32)
+    if is_gray:
+        channel = image.astype(np.float32)
         background = cv2.GaussianBlur(channel, (kernel_size, kernel_size), 0)
         corrected = cv2.subtract(channel, background)
         corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX)
-        result[:, :, c] = corrected
+        result = corrected.astype(np.uint8)
+    else:
+        result = np.zeros_like(image, dtype=np.float32)
+        for c in range(3):
+            channel = image[:, :, c].astype(np.float32)
+            background = cv2.GaussianBlur(channel, (kernel_size, kernel_size), 0)
+            corrected = cv2.subtract(channel, background)
+            corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX)
+            result[:, :, c] = corrected
+        result = result.astype(np.uint8)
 
     logger.info(f"Illumination normalized (kernel={kernel_size})")
-    return result.astype(np.uint8)
+    return result
 
 
 def _enhance_contrast(image: np.ndarray, clip_limit: float = 2.0) -> np.ndarray:
     """Adaptive contrast enhancement — CLAHE in LAB space.
     clip_limit: higher = more contrast (default 2.0, range 1.0-4.0)
+    Handles grayscale input by applying CLAHE directly.
     """
+    if len(image.shape) == 2:
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+        return clahe.apply(image)
+
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     light_ch, a, b = cv2.split(lab)
 
@@ -200,16 +222,30 @@ def _enhance_contrast(image: np.ndarray, clip_limit: float = 2.0) -> np.ndarray:
 def _mild_denoise(image: np.ndarray, h: int = 3) -> np.ndarray:
     """Non-destructive mild denoising.
     h=3 for mild, h=5 for stronger.
+    Handles grayscale and BGR input.
     """
+    if len(image.shape) == 2:
+        return cv2.fastNlMeansDenoising(image, None, h=h, templateWindowSize=7, searchWindowSize=21)
     return cv2.fastNlMeansDenoisingColored(
         image, None, h=h, hColor=h, templateWindowSize=7, searchWindowSize=21
     )
 
 
-def _remove_borders(image: np.ndarray, border_width: int = 10) -> np.ndarray:
+def _remove_borders(image: np.ndarray, border_width: int = None) -> np.ndarray:
     """Remove scanner borders from edges.
-    Increased from 5 to 10px for better coverage.
+
+    Args:
+        image: Input BGR/Grayscale image.
+        border_width: Width of border to remove in pixels.
+                     Uses settings.border_removal_width if None.
+                     Set to 0 to disable border removal entirely.
     """
+    if border_width is None:
+        border_width = BORDER_REMOVAL_WIDTH
+
+    if border_width <= 0:
+        return image
+
     result = image.copy()
     h, w = image.shape[:2]
     result[:border_width, :] = 255
@@ -321,10 +357,10 @@ def light_preprocess(
         image = _enhance_contrast(image, clip_limit=contrast_clip_limit)
         steps.append(f"contrast(clip={contrast_clip_limit})")
 
-    # 7. Border removal
+    # 7. Border removal (with configurable width from settings)
     if apply_border_removal:
-        image = _remove_borders(image, border_width=10)
-        steps.append("border_removal")
+        image = _remove_borders(image)
+        steps.append(f"border_removal(w={BORDER_REMOVAL_WIDTH})")
 
     after_metrics = _compute_quality_metrics(image) if return_metrics else None
 

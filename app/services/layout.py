@@ -16,10 +16,13 @@ References:
     [3] HSV color segmentation for stamp detection
 """
 
+import os
 
 import cv2
 import numpy as np
 from loguru import logger
+
+from app.core.config import settings
 
 # ── Constants ──
 ELEMENT_TYPES = [
@@ -62,8 +65,107 @@ class LayoutDetector:
     """
 
     def __init__(self):
-        self.model_path = "app/models/layout/yolov8n.pt"  # For future fine-tuned model
+        self.model_path = settings.layout_yolo_model_path
         self.yolo_model = None  # Will be loaded lazily if needed
+        self.use_yolo = settings.layout_use_yolo
+
+    def _load_yolo(self):
+        """Lazy-load YOLOv8 model when first needed."""
+        if self.yolo_model is None and self.use_yolo:
+            try:
+                from ultralytics import YOLO
+
+                model_path = settings.layout_yolo_model_path
+                if os.path.exists(model_path):
+                    logger.info(f"Loading YOLO model from {model_path}")
+                    self.yolo_model = YOLO(model_path)
+                    logger.info("YOLOv8 model loaded for layout detection")
+                else:
+                    logger.warning(f"YOLO model not found at {model_path}, using heuristic methods")
+            except ImportError:
+                logger.warning("ultralytics not installed. Run: pip install ultralytics")
+                self.use_yolo = False
+            except Exception as e:
+                logger.warning(f"Failed to load YOLO model: {e}")
+                self.use_yolo = False
+        return self.yolo_model is not None
+
+    def detect_yolo(self, image: np.ndarray) -> dict:
+        """Detect layout elements using YOLOv8.
+
+        Returns table_info in the same format as heuristic methods,
+        so it can be used interchangeably.
+        """
+        if not self._load_yolo():
+            return {"rows": [], "columns": [], "num_rows": 0, "num_cols": 0}
+
+        try:
+            results = self.yolo_model(image, conf=settings.layout_yolo_confidence, device="cpu")
+
+            rows = []
+            cols = set()
+            all_boxes = []
+
+            for result in results:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    cls_id = int(box.cls[0].item())
+                    conf = float(box.conf[0].item())
+                    label = result.names[cls_id]
+
+                    all_boxes.append(
+                        {
+                            "bbox": (x1, y1, x2, y2),
+                            "label": label,
+                            "confidence": conf,
+                        }
+                    )
+
+                    # Collect rows from relevant classes
+                    if label in ("table", "record_block", "header_row", "data_row"):
+                        rows.append((y1, y2))
+
+                    # Collect columns from cell-like objects
+                    if label in ("data_cell",):
+                        cols.add(x1)
+                        cols.add(x2)
+
+            # Sort rows by y-position
+            rows.sort(key=lambda r: r[0])
+
+            # Build column segments
+            col_list = sorted(cols)
+            columns = []
+            for i in range(len(col_list) - 1):
+                if col_list[i + 1] - col_list[i] > 20:  # Min column width
+                    columns.append((col_list[i], col_list[i + 1]))
+
+            logger.info(f"YOLO detected {len(rows)} rows, {len(columns)} columns")
+            return {
+                "rows": rows,
+                "columns": columns if columns else [(0, image.shape[1])],
+                "num_rows": len(rows),
+                "num_cols": max(len(columns), 1),
+                "yolo_boxes": all_boxes,
+                "source": "yolo",
+            }
+        except Exception as e:
+            logger.warning(f"YOLO detection failed: {e}")
+            return {
+                "rows": [],
+                "columns": [],
+                "num_rows": 0,
+                "num_cols": 0,
+                "source": "yolo_failed",
+            }
+
+    def _heuristic_table_detection(self, image: np.ndarray, gray_raw: np.ndarray = None) -> dict:
+        """Fallback heuristic table detection when YOLO is not available/enabled.
+        Uses the original multi-strategy approach.
+        """
+        if gray_raw is not None:
+            return self.detect_table_boundaries_from_raw(gray_raw)
+        return self.detect_table_robust(image, gray_raw)
 
     # ── 1. Table Boundary Detection ──
     def detect_table_boundaries(self, gray: np.ndarray) -> dict:
@@ -770,11 +872,19 @@ class LayoutDetector:
         h, w = image.shape[:2]
         all_elements = []
 
-        # 1. Table detection — use raw gray if available (preserves thin table lines)
-        if gray_raw is not None:
-            table_info = self.detect_table_boundaries_from_raw(gray_raw)
+        # 1. Table detection — try YOLO first if enabled, fallback to heuristics
+        if self.use_yolo and self._load_yolo():
+            yolo_info = self.detect_yolo(image)
+            if yolo_info["num_rows"] >= 2:
+                logger.info(
+                    f"YOLO table detection: {yolo_info['num_rows']}r x {yolo_info['num_cols']}c"
+                )
+                table_info = yolo_info
+            else:
+                logger.info("YOLO returned insufficient rows, falling back to heuristic")
+                table_info = self._heuristic_table_detection(image, gray_raw)
         else:
-            table_info = self.detect_table_robust(image, gray_raw)
+            table_info = self._heuristic_table_detection(image, gray_raw)
 
         # 2. Determine if this is a table page or text page
         is_table = self._is_table_page(gray, table_info)

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 class FieldPrediction(BaseModel):
     """A single extracted field with confidence score."""
+
     value: str
     confidence: float
 
@@ -20,6 +21,7 @@ class FieldPrediction(BaseModel):
 
 class NameResolution(BaseModel):
     """Normalized name with variants."""
+
     original: str
     canonical: str
     variants: list[str] = []
@@ -45,6 +47,7 @@ class NameResolution(BaseModel):
 
 class ExtractionMetadata(BaseModel):
     """Metadata about the extraction process."""
+
     average_confidence: float = 0.0
     source_length: int = 0
     method: str | None = None

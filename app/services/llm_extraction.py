@@ -5,25 +5,38 @@ import re
 
 from loguru import logger
 
+from app.core.config import settings
+from app.core.llm_client import LLMClientBase, create_llm_client
 from app.services.extraction import InformationExtractor
 
 
 class LLMAssistedExtractor:
     """Extracts structured genealogical data using LLM assistance.
     Only activates when rule-based extraction confidence is below threshold.
-    Uses Ollama or HuggingFace transformers for local inference.
+    Supports multiple LLM providers via the LLMClientBase abstraction:
+
+        - ollama:     Локальный Ollama (по умолчанию)
+        - openai:     OpenAI / OpenAI-compatible (vLLM, TGI, Together AI, etc.)
+        - huggingface: Локальный HuggingFace Transformers
     """
 
-    def __init__(self, model_name: str = "llama3.1:8b", use_ollama: bool = True):
-        self.model_name = model_name
-        self.use_ollama = use_ollama
+    def __init__(self, provider: str = None, model_name: str = None):
         self.rule_extractor = InformationExtractor()
-        self.confidence_threshold = 0.7
+        self.confidence_threshold = settings.llm_confidence_threshold
 
-        if use_ollama:
-            self._init_ollama()
-        else:
-            self._init_transformers()
+        # Создаём LLM-клиент через фабрику
+        self.llm_client: LLMClientBase | None = None
+        try:
+            self.llm_client = create_llm_client(provider=provider)
+            if not self.llm_client.is_available():
+                logger.warning(
+                    f"LLM provider '{provider or settings.llm_provider}' not available. "
+                    "Rule-based extraction will be used as fallback."
+                )
+        except Exception as e:
+            logger.warning(f"Failed to initialize LLM client: {e}")
+
+        self.model_name = model_name or settings.llm_model_name
 
         # Russian-language extraction prompt
         self.extraction_prompt = """Ты ассистент по извлечению генеалогических данных из русских метрических книг.
@@ -66,77 +79,21 @@ class LLMAssistedExtractor:
 ---
 Верни ТОЛЬКО JSON объект, без дополнительного текста."""
 
-        logger.info(f"LLM Extractor initialized (model={model_name}, ollama={use_ollama})")
+        logger.info(
+            f"LLM Extractor initialized "
+            f"(provider={provider or settings.llm_provider}, "
+            f"model={self.model_name})"
+        )
 
-    def _init_ollama(self):
-        try:
-            import httpx
-
-            self.ollama_client = httpx.Client(base_url="http://localhost:11434")
-            response = self.ollama_client.get("/api/tags")
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [m["name"] for m in models]
-                if self.model_name not in model_names:
-                    logger.warning(f"Model '{self.model_name}' not found. Available: {model_names}")
-                logger.info(f"Ollama connected. Available: {model_names}")
-            else:
-                logger.warning(f"Ollama status {response.status_code}")
-        except ImportError:
-            logger.error("httpx not installed. Run: pip install httpx")
-            self.ollama_client = None
-        except Exception as e:
-            logger.warning(f"Ollama not available: {e}")
-            self.ollama_client = None
-
-    def _init_transformers(self):
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-
-            logger.info(f"Loading model: {self.model_name}")
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.hf_model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, device_map="auto", torch_dtype="auto"
-            )
-        except Exception as e:
-            logger.error(f"Failed to load: {e}")
-            self.hf_model = None
-            self.hf_tokenizer = None
-
-    def _query_ollama(self, prompt: str) -> str:
-        if self.ollama_client is None:
+    def _query_llm(self, prompt: str) -> str:
+        """Отправить запрос к LLM через универсальный клиент."""
+        if self.llm_client is None or not self.llm_client.is_available():
+            logger.warning("LLM client not available, skipping LLM query")
             return ""
         try:
-            response = self.ollama_client.post(
-                "/api/generate",
-                json={
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 2048},
-                },
-                timeout=30,
-            )
-            if response.status_code == 200:
-                return response.json().get("response", "")
+            return self.llm_client.query(prompt)
         except Exception as e:
-            logger.warning(f"Ollama query failed: {e}")
-        return ""
-
-    def _query_transformers(self, prompt: str) -> str:
-        if self.hf_model is None:
-            return ""
-        try:
-            inputs = self.hf_tokenizer(prompt, return_tensors="pt")
-            outputs = self.hf_model.generate(
-                inputs.input_ids, max_new_tokens=512, temperature=0.1, do_sample=False
-            )
-            response = self.hf_tokenizer.decode(outputs[0], skip_special_tokens=True)
-            if prompt in response:
-                response = response[len(prompt) :].strip()
-            return response
-        except Exception as e:
-            logger.warning(f"Transformers failed: {e}")
+            logger.warning(f"LLM query failed: {e}")
             return ""
 
     def _parse_llm_response(self, response: str) -> dict | None:
@@ -198,12 +155,9 @@ class LLMAssistedExtractor:
         return None
 
     def extract_with_llm(self, text: str) -> dict:
+        """Извлечение данных через LLM."""
         prompt = self.extraction_prompt.format(text=text)
-
-        if self.use_ollama:
-            response = self._query_ollama(prompt)
-        else:
-            response = self._query_transformers(prompt)
+        response = self._query_llm(prompt)
 
         if not response:
             logger.warning("LLM empty response, falling back to rule-based")
@@ -218,6 +172,7 @@ class LLMAssistedExtractor:
         result["_extraction"] = {
             "method": "llm",
             "model": self.model_name,
+            "provider": settings.llm_provider,
             "source_length": len(text),
         }
 

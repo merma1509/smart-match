@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +16,10 @@ app = FastAPI(
     description="Genealogical data extraction from metrical books",
 )
 
-# CORS
+# CORS — ограничен в production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.effective_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,6 +43,7 @@ async def startup():
 
     # Preload heavy models
     from app.services.ocr import preload_models
+
     preload_models()
 
     logger.info(f"{settings.app_name} API ready")

@@ -33,6 +33,20 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5.0",
 ]
+gpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+yolo = [
+    "ultralytics>=8.0.0",
+]
+full = [
+    "smart-match[gpu]",
+    "smart-match[yolo]",
+    "transformers>=4.35.0",
+    "accelerate>=0.25.0",
+    "sentencepiece>=0.1.99",
+]
 
 [project.urls]
 Homepage = "https://github.com/mnijonshuti/smart-match"
@@ -58,4 +72,5 @@ indent-style = "space"
 
 [tool.ruff.lint.per-file-ignores]
 "app/services/llm_extraction.py" = ["E501"]
+"app/core/llm_client.py" = ["E501"]
 "app/services/extraction.py" = ["E501"]

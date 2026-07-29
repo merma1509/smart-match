@@ -1,4 +1,5 @@
 """POST /extract endpoint — main pipeline."""
+
 import json
 import os
 import time
@@ -20,7 +21,7 @@ from app.services.postprocessing import postprocess_ocr_text
 
 router = APIRouter()
 
-UPLOAD_DIR = Path(settings.input_dir)
+UPLOAD_DIR = Path(settings.upload_dir)
 RESULTS_DIR = Path(settings.output_dir)
 ALLOWED_EXTENSIONS = {e for e in settings.allowed_extensions if e in {".jpg", ".jpeg", ".png"}}
 MAX_FILE_SIZE = settings.max_file_size_mb * 1024 * 1024
@@ -31,7 +32,9 @@ def validate_file(file: UploadFile):
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"File type '{ext}' not allowed. Allowed: {ALLOWED_EXTENSIONS}")
     if file.size and file.size > MAX_FILE_SIZE:
-        raise HTTPException(400, f"File too large ({file.size} bytes). Max: {settings.max_file_size_mb}MB")
+        raise HTTPException(
+            400, f"File too large ({file.size} bytes). Max: {settings.max_file_size_mb}MB"
+        )
 
 
 def _process_single_image(image_path: Path, file_name: str, request_id: str) -> dict:
@@ -57,9 +60,7 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
         gray_raw = cv2.resize(gray_raw, (int(w * scale), int(h * scale)))
 
     layout = analyze_layout(preprocessed, gray_raw=gray_raw)
-    logger.info(
-        f"[{request_id}] Layout: {layout['page_type']}, {len(layout['elements'])} elements"
-    )
+    logger.info(f"[{request_id}] Layout: {layout['page_type']}, {len(layout['elements'])} elements")
 
     # 3. OCR on text regions
     texts = []
@@ -139,44 +140,82 @@ async def extract(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"[{request_id}] Failed: {e}")
         import traceback
+
         traceback.print_exc()
         raise HTTPException(500, f"Processing failed: {str(e)}")
 
 
 @router.post("/extract/batch")
 async def extract_batch(files: list[UploadFile] = File(...)):
-    """Extract from multiple images in one request."""
+    """Extract from multiple images in one request.
+
+    Транзакционная обработка: при сбое любого файла все ранее созданные
+    результаты и загруженные файлы удаляются (rollback).
+    """
     if len(files) > 20:
         raise HTTPException(400, "Maximum 20 files per batch request")
 
-    results = []
-    errors = []
+    results: list[dict] = []
+    errors: list[dict] = []
+    created_files: list[Path] = []
+    created_results: list[Path] = []
 
-    for file in files:
-        file_request_id = str(uuid.uuid4())[:8]
-        ext = os.path.splitext(file.filename or "")[1] or ".jpg"
-        input_path = UPLOAD_DIR / f"{file_request_id}{ext}"
+    try:
+        for file in files:
+            file_request_id = str(uuid.uuid4())[:8]
+            ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+            input_path = UPLOAD_DIR / f"{file_request_id}{ext}"
 
-        try:
             content = await file.read()
             with open(input_path, "wb") as f:
                 f.write(content)
+            created_files.append(input_path)
 
-            result = _process_single_image(
-                input_path, file.filename or "unknown", file_request_id
-            )
+            result = _process_single_image(input_path, file.filename or "unknown", file_request_id)
             results.append(result)
-        except Exception as e:
-            logger.error(f"[{file_request_id}] Batch item failed: {e}")
-            errors.append({
-                "file": file.filename,
-                "error": str(e),
-            })
+
+            result_path = RESULTS_DIR / f"{file_request_id}.json"
+            if result_path.exists():
+                created_results.append(result_path)
+
+    except Exception as e:
+        logger.error(f"Batch processing failed, initiating rollback: {e}")
+        # ROLLBACK: удаляем все созданные файлы и результаты
+        for path in created_results:
+            try:
+                path.unlink(missing_ok=True)
+                logger.info(f"Rollback: deleted result {path}")
+            except Exception as cleanup_err:
+                logger.warning(f"Rollback: failed to delete {path}: {cleanup_err}")
+
+        for path in created_files:
+            try:
+                path.unlink(missing_ok=True)
+                logger.info(f"Rollback: deleted upload {path}")
+            except Exception as cleanup_err:
+                logger.warning(f"Rollback: failed to delete {path}: {cleanup_err}")
+
+        errors.append(
+            {
+                "file": getattr(file, "filename", "unknown"),
+                "error": f"Batch aborted: {str(e)}",
+            }
+        )
+
+        return {
+            "total": len(results) + len(errors),
+            "success": len(results),
+            "failed": len(errors),
+            "rollback": True,
+            "results": results,
+            "errors": errors,
+        }
 
     return {
         "total": len(results) + len(errors),
         "success": len(results),
         "failed": len(errors),
+        "rollback": False,
         "results": results,
         "errors": errors,
     }
