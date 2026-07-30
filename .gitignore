@@ -72,3 +72,4 @@ app/models/ocr/fine_tuned_trocr/*.txt
 app/models/layout/*.pt
 trocr_finetuned/
 
+app/models/ocr/fine_tuned_trocr/model.safetensors
