@@ -3,11 +3,16 @@
 """
 
 from abc import ABC, abstractmethod
+from functools import lru_cache
 
 import httpx
 from loguru import logger
 
 from app.core.config import settings
+
+# Global client cache — create once, reuse everywhere
+_llm_client_cache: LLMClientBase | None = None
+_llm_client_warning_shown = False
 
 
 class LLMClientBase(ABC):
@@ -196,8 +201,17 @@ class HuggingFaceClient(LLMClientBase):
         return ""
 
 
-def create_llm_client(provider: str = None) -> LLMClientBase:
-    """Factory: создаёт LLM-клиент по указанному провайдеру."""
+def get_llm_client(provider: str = None) -> LLMClientBase | None:
+    """Get cached LLM client — creates once, reuses everywhere.
+
+    Returns None if client is unavailable (after first check).
+    """
+    global _llm_client_cache, _llm_client_warning_shown
+
+    # Return cached client if available
+    if _llm_client_cache is not None:
+        return _llm_client_cache
+
     provider = provider or settings.llm_provider
 
     providers = {
@@ -212,5 +226,31 @@ def create_llm_client(provider: str = None) -> LLMClientBase:
         client_class = OllamaClient
 
     client = client_class()
-    logger.info(f"LLM client created: {provider} ({client.__class__.__name__})")
+
+    # Check availability once on startup
+    if not client.is_available():
+        if not _llm_client_warning_shown:
+            logger.warning(
+                f"LLM provider '{provider}' not available. "
+                "Rule-based extraction will be used."
+            )
+            _llm_client_warning_shown = True
+        # Cache None-equivalent by marking as unavailable
+        _llm_client_cache = client  # Still cache it, is_available() returns False
+        return client
+
+    logger.info(f"LLM client ready: {provider} ({client.__class__.__name__})")
+    _llm_client_cache = client
     return client
+
+
+def create_llm_client(provider: str = None) -> LLMClientBase | None:
+    """Legacy alias — use get_llm_client() instead."""
+    return get_llm_client(provider)
+
+
+def reset_llm_client():
+    """Reset cached client (for testing)."""
+    global _llm_client_cache, _llm_client_warning_shown
+    _llm_client_cache = None
+    _llm_client_warning_shown = False

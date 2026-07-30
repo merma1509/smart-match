@@ -30,7 +30,7 @@ try:
     TROCR_AVAILABLE = True
 except ImportError:
     TROCR_AVAILABLE = False
-    logger.warning("transformers/torch not installed. TrOCR unavailable.")
+    logger.debug("TrOCR unavailable (transformers/torch not installed). Using EasyOCR fallback.")
 
 # ── Path to fine-tuned model ──
 FINETUNED_TROCR_PATH = (

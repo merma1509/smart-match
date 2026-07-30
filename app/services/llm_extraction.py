@@ -6,7 +6,7 @@ import re
 from loguru import logger
 
 from app.core.config import settings
-from app.core.llm_client import LLMClientBase, create_llm_client
+from app.core.llm_client import get_llm_client
 from app.services.extraction import InformationExtractor
 
 
@@ -23,20 +23,10 @@ class LLMAssistedExtractor:
     def __init__(self, provider: str = None, model_name: str = None):
         self.rule_extractor = InformationExtractor()
         self.confidence_threshold = settings.llm_confidence_threshold
-
-        # Создаём LLM-клиент через фабрику
-        self.llm_client: LLMClientBase | None = None
-        try:
-            self.llm_client = create_llm_client(provider=provider)
-            if not self.llm_client.is_available():
-                logger.warning(
-                    f"LLM provider '{provider or settings.llm_provider}' not available. "
-                    "Rule-based extraction will be used as fallback."
-                )
-        except Exception as e:
-            logger.warning(f"Failed to initialize LLM client: {e}")
-
         self.model_name = model_name or settings.llm_model_name
+
+        # Use cached client — no per-request initialization warnings
+        self.llm_client = get_llm_client(provider=provider)
 
         # Russian-language extraction prompt
         self.extraction_prompt = """Ты ассистент по извлечению генеалогических данных из русских метрических книг.
@@ -79,16 +69,9 @@ class LLMAssistedExtractor:
 ---
 Верни ТОЛЬКО JSON объект, без дополнительного текста."""
 
-        logger.info(
-            f"LLM Extractor initialized "
-            f"(provider={provider or settings.llm_provider}, "
-            f"model={self.model_name})"
-        )
-
     def _query_llm(self, prompt: str) -> str:
         """Отправить запрос к LLM через универсальный клиент."""
         if self.llm_client is None or not self.llm_client.is_available():
-            logger.warning("LLM client not available, skipping LLM query")
             return ""
         try:
             return self.llm_client.query(prompt)
@@ -160,7 +143,7 @@ class LLMAssistedExtractor:
         response = self._query_llm(prompt)
 
         if not response:
-            logger.warning("LLM empty response, falling back to rule-based")
+            logger.debug("LLM empty response, falling back to rule-based")
             return self.rule_extractor.extract(text, _llm_fallback=True)
 
         result = self._parse_llm_response(response)
@@ -195,7 +178,7 @@ class LLMAssistedExtractor:
             return rule_result
 
         # Step 3: Use LLM
-        logger.info(
+        logger.debug(
             f"Using LLM (rule-based confidence {rule_confidence:.2f} < {self.confidence_threshold})"
         )
         llm_result = self.extract_with_llm(text)

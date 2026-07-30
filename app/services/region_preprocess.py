@@ -289,7 +289,9 @@ def preprocess_marginal_note(region: np.ndarray) -> np.ndarray:
     steps.append("clahe(2.5)")
 
     # 3. Mild denoising
-    processed = cv2.fastNlMeansDenoising(processed, None, h=3, templateWindowSize=7, searchWindowSize=21)
+    processed = cv2.fastNlMeansDenoising(
+        processed, None, h=3, templateWindowSize=7, searchWindowSize=21
+    )
     steps.append("denoise(h=3)")
 
     # 4. Sharpen

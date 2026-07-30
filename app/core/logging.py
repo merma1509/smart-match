@@ -1,4 +1,5 @@
 """Set up structured logging for the entire application."""
+
 import os
 
 from loguru import logger

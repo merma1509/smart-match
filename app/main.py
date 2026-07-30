@@ -1,8 +1,19 @@
 """FastAPI application entry point."""
+import warnings
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Suppress noisy PyTorch/EasyOCR internal warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+warnings.filterwarnings("ignore", message=".*pin_memory.*")
+warnings.filterwarnings("ignore", message=".*quantize_per_tensor.*")
+warnings.filterwarnings("ignore", message=".*This module is much faster with a GPU.*")
+
+# Suppress EasyOCR CPU warning on startup
+import logging
+logging.getLogger("easyocr").setLevel(logging.ERROR)
 
 from app.api.routes.extract import router as extract_router
 from app.api.routes.health import router as health_router
