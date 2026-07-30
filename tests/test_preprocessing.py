@@ -16,19 +16,18 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.services.light_preprocess import (
-    _limit_image_size,
-    _deskew_robust,
-    _color_normalize,
-    _illumination_normalize,
-    _enhance_contrast,
-    _mild_denoise,
-    _remove_borders,
-    _compute_quality_metrics,
-    light_preprocess,
     MAX_IMAGE_DIMENSION,
     MIN_IMAGE_DIMENSION,
+    _color_normalize,
+    _compute_quality_metrics,
+    _deskew_robust,
+    _enhance_contrast,
+    _illumination_normalize,
+    _limit_image_size,
+    _mild_denoise,
+    _remove_borders,
+    light_preprocess,
 )
-
 
 # ── Fixtures ──
 

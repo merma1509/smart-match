@@ -1,6 +1,7 @@
 # Business logic: Information Extraction parses OCR text into structured genealogical data
 # Extracts names, dates, relationships from Russian metrical book text into structured JSON
 import re
+
 from loguru import logger
 
 from app.core.config import settings
@@ -293,7 +294,7 @@ class InformationExtractor:
         )
         return result
 
-    def extract(self, text: str, force_llm: bool = False) -> dict:
+    def extract(self, text: str, force_llm: bool = False, _llm_fallback: bool = False) -> dict:
         """Extract structured data from OCR text.
 
         Strategy:
@@ -302,6 +303,11 @@ class InformationExtractor:
         3. If confidence is low, try LLM fallback
         4. Merge results
         5. Compute metadata
+
+        Args:
+            text: OCR text to extract from
+            force_llm: Force LLM usage even if rule-based confidence is high
+            _llm_fallback: Internal flag to prevent infinite recursion when called from LLM extractor
 
         Returns:
             dict with extracted fields and metadata
@@ -349,9 +355,13 @@ class InformationExtractor:
             "language": "ru",
         }
 
-        # Step 4: If confidence low, try LLM
+        # Step 4: If confidence low, try LLM (but not if already in LLM fallback)
         llm_extractor = self._get_llm_extractor()
-        if llm_extractor and (force_llm or avg_conf < settings.ocr_confidence_threshold):
+        if (
+            llm_extractor
+            and not _llm_fallback
+            and (force_llm or avg_conf < settings.ocr_confidence_threshold)
+        ):
             logger.info(
                 f"Trying LLM (rule confidence {avg_conf:.2f} < {settings.ocr_confidence_threshold})"
             )

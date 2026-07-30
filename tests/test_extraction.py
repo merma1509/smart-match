@@ -2,7 +2,7 @@
 class TestPydanticSchemas:
     def test_birth_schema_validation(self, extractor, birth_text):
         """Test that birth result can be validated with Pydantic schema."""
-        from app.schemas.responses import BirthExtractionResult, FieldPrediction, ExtractionMetadata
+        from app.schemas.responses import BirthExtractionResult, ExtractionMetadata, FieldPrediction
 
         result = extractor.extract(birth_text)
         # Convert result to match schema structure (use extraction_meta alias)
@@ -20,7 +20,7 @@ class TestPydanticSchemas:
 
     def test_death_schema_validation(self, extractor, death_text):
         """Test that death result can be validated with Pydantic schema."""
-        from app.schemas.responses import DeathExtractionResult, FieldPrediction, ExtractionMetadata
+        from app.schemas.responses import DeathExtractionResult, ExtractionMetadata, FieldPrediction
 
         result = extractor.extract(death_text)
         # Handle optional age field
@@ -41,7 +41,11 @@ class TestPydanticSchemas:
 
     def test_marriage_schema_validation(self, extractor, marriage_text):
         """Test that marriage result can be validated with Pydantic schema."""
-        from app.schemas.responses import MarriageExtractionResult, FieldPrediction, ExtractionMetadata
+        from app.schemas.responses import (
+            ExtractionMetadata,
+            FieldPrediction,
+            MarriageExtractionResult,
+        )
 
         result = extractor.extract(marriage_text)
         marriage_result = MarriageExtractionResult(
@@ -53,4 +57,3 @@ class TestPydanticSchemas:
             extraction_meta=ExtractionMetadata(**result["_extraction"]),
         )
         assert marriage_result.record_type == "marriage"
-

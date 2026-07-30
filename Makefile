@@ -1,4 +1,4 @@
-.PHONY: help build run stop restart clean logs test extract extract-small results health docs shell status
+.PHONY: help build run stop restart clean logs test extract extract-small results health docs shell status lint format fmt
 
 help:
 	@echo "Smart Match API — Makefile"
@@ -21,9 +21,7 @@ help:
 	@echo "  make status         Show container status"
 	@echo "  make lint           Check code for errors"
 	@echo "  make format         Sorting codes"
-	@echo "  make fmt            Formating and checking"
-	@echo ""
-	@echo "Quick start: make build run test"
+	@echo "  make fmt            Format and check"
 
 build:
 	docker compose build
@@ -44,20 +42,38 @@ clean:
 	docker system prune -f
 
 test:
-	curl -s http://localhost:8000/ | python3 -m json.tool
+	@echo "Testing API..."
+	@for i in $$(seq 1 15); do \
+	if curl -sf http://localhost:8000/ > /dev/null 2>&1; then \
+	curl -s http://localhost:8000/ | python3 -m json.tool; \
+	exit 0; \
+	fi; \
+	echo "  Waiting for API ($$i/15)..."; \
+	sleep 2; \
+	done; \
+	echo '{"error": "API did not start in time"}'
 
 health:
-	curl -s http://localhost:8000/health | python3 -m json.tool
+	@echo "Checking health..."
+	@for i in $$(seq 1 5); do \
+	result=$$(curl -sf http://localhost:8000/health 2>/dev/null); \
+	if [ -n "$$result" ]; then \
+	echo "$$result" | python3 -m json.tool; \
+	exit 0; \
+	fi; \
+	sleep 2; \
+	done; \
+	echo '{"error": "Health endpoint unavailable"}'
 
 extract:
 	curl -s -X POST \
-	  -F "file=@data/01-0203-0745-001452/00000006.jpg" \
-	  http://localhost:8000/extract | python3 -m json.tool
+	-F "file=@data/images/00000006.jpg" \
+	http://localhost:8000/extract | python3 -m json.tool
 
 extract-small:
 	curl -s -X POST \
-	  -F "file=@data/01-0203-0745-000600/00000009.jpg" \
-	  http://localhost:8000/extract | python3 -m json.tool
+	-F "file=@data/images/00000009.jpg" \
+	http://localhost:8000/extract | python3 -m json.tool
 
 results:
 	curl -s http://localhost:8000/results/ | python3 -m json.tool

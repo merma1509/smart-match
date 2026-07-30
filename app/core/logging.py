@@ -1,5 +1,6 @@
-# Set up structured logging for the entire application
+"""Set up structured logging for the entire application."""
 import os
+
 from loguru import logger
 
 from app.core.config import settings
@@ -9,11 +10,19 @@ os.makedirs("logs", exist_ok=True)
 # Remove default handler
 logger.remove()
 
+# Console format - split for readability
+console_format = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+    "<level>{message}</level>"
+)
+
 # Add console handler
 logger.add(
     sink=lambda msg: print(msg, end=""),
     level=settings.log_level,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    format=console_format,
     colorize=True,
 )
 

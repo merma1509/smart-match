@@ -3,11 +3,13 @@ __pycache__/
 *.py[cod]
 *.so
 .Python
+.ipynb_checkpoints/
 
 # Build
 build/
 *.egg-info/
 dist/
+*.whl
 
 # Virtual environment
 venv/
@@ -19,18 +21,31 @@ env/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Project specific
-data/
-models/
+# Игнорируем содержимое, но не сами директории
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
 uploads/*
-results/*.json
+!uploads/.gitkeep
+results/*
+!results/.gitkeep
+
 *.pt
 *.pkl
+*.h5
+*.onnx
+*.bin
+
+# Jupyter Notebooks
+*.ipynb_checkpoints
 
 # Docker
 .dockerignore
@@ -38,4 +53,13 @@ results/*.json
 # Testing
 .pytest_cache/
 .ruff_cache/
-.coverag
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+

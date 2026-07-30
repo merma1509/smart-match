@@ -34,8 +34,7 @@ except ImportError:
 
 # ── Path to fine-tuned model ──
 FINETUNED_TROCR_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "app" / "models" / "ocr" / "fine_tuned_trocr"
+    Path(__file__).resolve().parent.parent.parent / "app" / "models" / "ocr" / "fine_tuned_trocr"
 )
 
 
@@ -53,7 +52,9 @@ class OCREngine:
         if not TROCR_AVAILABLE:
             return None, None
         model_path = FINETUNED_TROCR_PATH
-        if not model_path.exists() or not (list(model_path.glob("*.safetensors")) or list(model_path.glob("*.bin"))):
+        if not model_path.exists() or not (
+            list(model_path.glob("*.safetensors")) or list(model_path.glob("*.bin"))
+        ):
             logger.info(f"Fine-tuned model not found, using base: {settings.ocr_model_name}")
             model_path_str = settings.ocr_model_name
         else:
@@ -65,7 +66,9 @@ class OCREngine:
             cls._trocr_model = VisionEncoderDecoderModel.from_pretrained(model_path_str).to(device)
             cls._trocr_model.eval()
             cls._trocr_device = device
-            logger.info(f"TrOCR loaded ({sum(p.numel() for p in cls._trocr_model.parameters())/1e6:.0f}M params)")
+            logger.info(
+                f"TrOCR loaded ({sum(p.numel() for p in cls._trocr_model.parameters()) / 1e6:.0f}M params)"
+            )
             return cls._trocr_processor, cls._trocr_model
         except Exception as e:
             logger.error(f"Failed to load TrOCR: {e}")
@@ -92,9 +95,11 @@ class OCREngine:
         try:
             if isinstance(image, str):
                 from PIL import Image as PILImage
+
                 img = PILImage.open(image).convert("RGB")
             elif isinstance(image, np.ndarray):
                 from PIL import Image as PILImage
+
                 img = PILImage.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
                 img = image
@@ -232,4 +237,3 @@ def cleanup_all():
     OCREngine._trocr_model = None
     OCREngine._trocr_processor = None
     logger.info("OCR resources freed")
-

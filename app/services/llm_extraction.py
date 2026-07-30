@@ -161,13 +161,13 @@ class LLMAssistedExtractor:
 
         if not response:
             logger.warning("LLM empty response, falling back to rule-based")
-            return self.rule_extractor.extract(text)
+            return self.rule_extractor.extract(text, _llm_fallback=True)
 
         result = self._parse_llm_response(response)
 
         if result is None:
             logger.warning("LLM parsing failed, falling back to rule-based")
-            return self.rule_extractor.extract(text)
+            return self.rule_extractor.extract(text, _llm_fallback=True)
 
         result["_extraction"] = {
             "method": "llm",
@@ -185,8 +185,8 @@ class LLMAssistedExtractor:
         return result
 
     def extract(self, text: str, force_llm: bool = False) -> dict:
-        # Step 1: Rule-based extraction
-        rule_result = self.rule_extractor.extract(text)
+        # Step 1: Rule-based extraction (with flag to prevent recursion)
+        rule_result = self.rule_extractor.extract(text, _llm_fallback=True)
         rule_confidence = rule_result.get("_extraction", {}).get("average_confidence", 0.0)
 
         # Step 2: Check if LLM is needed

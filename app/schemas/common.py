@@ -1,5 +1,5 @@
 # Defines shared data types used across all schemas
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class FieldPrediction(BaseModel):
