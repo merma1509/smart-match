@@ -63,3 +63,12 @@ htmlcov/
 .env
 .env.*
 
+# ML Models - ignore all model files
+app/models/easyocr/*.pth
+app/models/easyocr/*.bin
+app/models/ocr/fine_tuned_trocr/*.safetensors
+app/models/ocr/fine_tuned_trocr/*.json
+app/models/ocr/fine_tuned_trocr/*.txt
+app/models/layout/*.pt
+trocr_finetuned/
+
