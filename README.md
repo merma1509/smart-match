@@ -1,163 +1,349 @@
 # Smart Match
 
-**AI-powered document intelligence for Russian historical metrical books**
+**AI-powered document intelligence for historical Russian metrical books**
 
-Smart Match extracts structured genealogical data (births, marriages, deaths) from scanned Russian metrical books (метрические книги, XVIII-XX centuries).
+Smart Match is a REST API for automatic extraction of structured genealogical data (names, dates, places) from scans of historical metrical books using hybrid OCR and LLM-assisted extraction.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [API Endpoints](#api-endpoints)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Development](#development)
+
+---
+
+## Overview
+
+**Input**: photos/scans of metrical book pages (JPG, PNG)  
+**Output**: structured JSON with extracted records
+
+### Supported Record Types
+
+| Type         | Keywords                  | Extracted Fields                     |
+| ------------ | ------------------------- | ------------------------------------ |
+| **Birth**    | родился, крещён, родилася | person, date, place, parents         |
+| **Death**    | умер, скончался, погребён | person, date, place, age             |
+| **Marriage** | венчался, обручен, брак   | groom, bride, date, place, witnesses |
+
+---
+
+## Architecture
+
+### Pipeline Flow
+
+```
+Image Upload → Preprocessing (OpenCV) → Layout Detection → OCR Engine
+                                                              │
+                                          ┌───────────────────┼───────────────────┐
+                                          │                   │                   │
+                                     Fine-tuned         EasyOCR              Tesseract
+                                       TrOCR             (cyrillic)            (rus)
+                                          │                   │                   │
+                                          └───────────────────┴───────────────────┘
+                                                              │
+                                                              ▼
+                                                    Text Cleanup & Correction
+                                                              │
+                                                              ▼
+                                                    Record Type Detection
+                                                   (keyword scoring)
+                                                              │
+                                         ┌─────────────────────┼─────────────────────┐
+                                         │                     │                     │
+                                    Birth Extractor      Death Extractor     Marriage Extractor
+                                         │                     │                     │
+                                         └─────────────────────┴─────────────────────┘
+                                                              │
+                                                              ▼
+                                                    Confidence Check
+                                                    (threshold: 0.7)
+                                                              │
+                              ┌──────────────────────────────┼──────────────────────────────┐
+                              │                              │                              │
+                         Rule-based                     LLM Extractor                   Hybrid
+                         (high conf)                   (low conf / force)             (default)
+                              │                              │                              │
+                              └──────────────────────────────┴──────────────────────────────┘
+                                                              │
+                                                              ▼
+                                                    Entity Resolution
+                                                              │
+                                                              ▼
+                                                         JSON Output
+```
+
+### Pipeline Details
+
+1. **Preprocessing** — color/illumination normalization, deskewing, denoising
+2. **OCR Engine** — cascading: fine-tuned TrOCR → EasyOCR (cyrillic) → Tesseract
+3. **Text Cleanup** — correction of typical OCR errors for old Cyrillic
+4. **Record Type Detection** — identification by keyword scoring
+5. **Information Extraction** — rule-based regex + LLM for complex records
+6. **Entity Resolution** — deduplication and normalization
+
+---
+
+## Tech Stack
+
+| Component            | Technology                    | Version/Parameters         |
+| -------------------- | ----------------------------- | -------------------------- |
+| **API Framework**    | FastAPI + Uvicorn             | Starlette-based            |
+| **OCR Primary**      | Fine-tuned TrOCR              | 334M params                |
+| **OCR Secondary**    | EasyOCR                       | cyrillic_g2.pth            |
+| **OCR Fallback**     | Tesseract OCR                 | Language: rus              |
+| **LLM Backend**      | Ollama / OpenAI / HuggingFace | llama3.1:8b (configurable) |
+| **Preprocessing**    | OpenCV, NumPy                 | cv2, scikit-image          |
+| **Config**           | Pydantic BaseModel            | Type-safe settings         |
+| **Containerization** | Docker + docker-compose       | Python 3.11-slim           |
 
 ---
 
 ## Quick Start
 
+### Prerequisites
+
+- Docker & Docker Compose
+- Python 3.11+ (for local development)
+- Ollama (for LLM extraction)
+
+### 1. Run with Docker
+
 ```bash
-# 1. Start the server
-uvicorn app.main:app --port 8000
-
-# 2. Open Swagger docs
-open http://localhost:8000/docs
-
-# 3. Extract data from an image
-curl -X POST -F "file=@image.jpg" http://localhost:8000/extract
+git clone https://github.com/mnijonshuti/smart-match.git
+cd smart-match
+docker compose up --build -d
+curl http://localhost:8000/health
 ```
 
-### Using Docker
+### 2. Setup Ollama (for LLM)
 
 ```bash
-make build
-make run
-make test
-make docs
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull model
+ollama pull llama3.1:8b
+
+# Start Ollama
+ollama serve
+```
+
+### 3. Test Extraction
+
+```bash
+curl -s -X POST http://localhost:8000/extract \
+  -F "file=@path/to/image.jpg" | jq .
+```
+
+### Make Commands
+
+```bash
+make help      # Show all commands
+make up        # Start containers
+make down      # Stop containers
+make restart   # Restart with rebuild
+make logs      # View logs
+make health    # Check API health
 ```
 
 ---
 
 ## API Endpoints
 
-| Method | Endpoint        | Description             |
-| ------ | --------------- | ----------------------- |
-| GET    | `/`             | Service info            |
-| GET    | `/health`       | Health check            |
-| POST   | `/extract`      | Extract data from image |
-| GET    | `/results`      | List all results        |
-| GET    | `/results/{id}` | Get result by ID        |
+### GET /health
 
-### Example response
+```json
+{
+  "status": "healthy",
+  "service": "Smart Match",
+  "version": "1.1.0",
+  "issues": null
+}
+```
+
+### POST /extract
+
+Extract data from image (multipart/form-data, file field: image)
 
 ```json
 {
   "request_id": "a1b2c3d4",
-  "file": "metrical_book.jpg",
-  "page_type": "table",
-  "extracted_data": {
-    "record_type": "birth",
-    "child_name": { "value": "Иван Петров", "confidence": 0.85 },
-    "birth_date": { "value": "1878-03-12", "confidence": 0.9 },
-    "father_name": { "value": "Петр Иванов", "confidence": 0.88 },
-    "mother_name": { "value": "Анна Иванова", "confidence": 0.86 },
-    "needs_review": false
+  "records": [
+    {
+      "record_type": "birth",
+      "person": {
+        "name": "Иван",
+        "patronymic": "Иванович",
+        "surname": "Петров"
+      },
+      "date": { "day": 15, "month": 3, "year": 1847 },
+      "place": {
+        "settlement": "село Покровское",
+        "district": "Касимовский уезд"
+      },
+      "parents": {
+        "father": { "name": "Иван", "surname": "Петров" },
+        "mother": { "name": "Анна", "surname": "Петрова" }
+      }
+    }
+  ],
+  "_extraction": {
+    "method": "hybrid",
+    "average_confidence": 0.0,
+    "llm_calls": 2,
+    "llm_provider": "ollama"
   }
 }
 ```
 
----
+### GET /results/{request_id}
 
-## Makefile Commands
+Retrieve previously saved result.
 
-```bash
-make help           Show help
-make build          Build Docker image
-make run            Start container
-make stop           Stop container
-make logs           Show logs
-make test           Test API
-make health         Check health
-make extract        Extract from sample image
-make results        List results
-make docs           Open Swagger
-make shell          Enter container
-make status         Container status
-```
+### POST /batch-extract
+
+Batch processing (multipart/form-data, files field).
 
 ---
 
-## Pipeline Architecture
+## Configuration
+
+Main settings in `app/core/config.py`:
+
+### OCR Settings
+
+| Parameter                  | Default | Description                  |
+| -------------------------- | ------- | ---------------------------- |
+| `ocr_confidence_threshold` | 0.7     | Threshold for LLM triggering |
+| `ocr_use_gpu`              | false   | Use GPU for EasyOCR          |
+| `tesseract_lang`           | rus     | Tesseract language           |
+
+### LLM Settings
+
+| Parameter                  | Default                | Description                 |
+| -------------------------- | ---------------------- | --------------------------- |
+| `llm_provider`             | ollama                 | ollama, openai, huggingface |
+| `llm_model_name`           | llama3.1:8b            | Model name                  |
+| `llm_api_base_url`         | http://localhost:11434 | API base URL                |
+| `llm_confidence_threshold` | 0.7                    | LLM activation threshold    |
+
+### Preprocessing
+
+| Parameter              | Default | Description              |
+| ---------------------- | ------- | ------------------------ |
+| `max_image_dimension`  | 3000    | Max image dimension (px) |
+| `border_removal_width` | 10      | Border removal width     |
+
+### Environment Variables
 
 ```bash
-Input Image
-    ↓
-[1] Light Preprocessing (deskew, color/illumination normalize, CLAHE, denoise)
-    ↓
-[2] Layout Detection (table vs text, cell extraction)
-    ↓
-[3] OCR (EasyOCR Russian + Tesseract fallback)
-    ↓
-[4] Post-processing (spelling, abbreviations, pre-1918 orthography)
-    ↓
-[5] Information Extraction (rule-based: birth/death/marriage)
-    ↓
-[6] Confidence Scoring + needs_review flag
-    ↓
-Structured JSON Output
+SMART_MATCH_ENV=production
+SMART_MATCH_LLM_PROVIDER=openai
+SMART_MATCH_LLM_API_KEY=sk-...
+SMART_MATCH_LOG_LEVEL=DEBUG
 ```
 
 ---
 
 ## Project Structure
 
-```bash
+```
 smart-match/
 ├── app/
-│   ├── main.py              # FastAPI entry point
-│   ├── api/routes/          # API endpoints
-│   ├── services/            # Business logic
-│   │   ├── light_preprocess.py    # Image preprocessing
-│   │   ├── layout.py              # Table/text detection
-│   │   ├── ocr.py                 # EasyOCR + Tesseract
-│   │   ├── region_preprocess.py   # Region-specific preprocessing
-│   │   ├── postprocessing.py      # Text correction
-│   │   ├── extraction.py          # Field extraction
-│   │   └── llm_extraction.py      # LLM fallback
-│   └── schemas/             # Pydantic models
-├── configs/                 # Configuration files
-├── Dockerfile
+│   ├── api/routes/
+│   │   ├── extract.py      # POST /extract
+│   │   ├── health.py       # GET /health
+│   │   └── results.py      # GET /results/{id}
+│   ├── core/
+│   │   ├── config.py       # Settings
+│   │   ├── llm_client.py   # LLM abstraction
+│   │   └── logging.py      # Loguru config
+│   ├── services/
+│   │   ├── extraction.py   # Info extraction
+│   │   ├── ocr.py          # OCR engine
+│   │   ├── light_preprocess.py  # Image preprocessing
+│   │   └── llm_extraction.py    # LLM extraction
+│   └── main.py             # FastAPI app
+├── configs/
+├── data/
+├── results/
+├── uploads/
+├── scripts/
+├── tests/
 ├── docker-compose.yml
+├── Dockerfile
 ├── Makefile
-├── pyproject.toml
-└── README.md
+└── pyproject.toml
 ```
-
----
-
-## Tech Stack
-
-| Component        | Technology             |
-| ---------------- | ---------------------- |
-| API              | FastAPI, Pydantic      |
-| OCR              | EasyOCR, Tesseract     |
-| Image Processing | OpenCV, NumPy          |
-| Logging          | Loguru                 |
-| Container        | Docker, Docker Compose |
-| Language         | Python 3.11+           |
 
 ---
 
 ## Development
 
+### Local Setup
+
 ```bash
-# Install dependencies
-pip install -e .
+python -m venv venv
+source venv/bin/activate
+pip install -e ".[full]"
 
-# Run tests
-pytest tests/ -v
+# Install Tesseract
+sudo apt install tesseract-ocr tesseract-ocr-rus  # Ubuntu
+brew install tesseract tesseract-lang              # macOS
 
-# Run locally
-uvicorn app.main:app --reload --port 8000
+python -m app.main
+```
+
+### Testing
+
+```bash
+pytest
+pytest tests/test_extraction.py -v
+pytest --cov=app tests/
+```
+
+### Code Quality
+
+```bash
+ruff check app/
+ruff format --check app/
+ruff format app/
 ```
 
 ---
 
-## Team
+## Extraction Methods
 
-- **Ayomide Isreal Ajibade** — a.ajibade@innopolis.university
-- **Niyonshuti Martin** — m.niyonshuti@innopolis.university
+| Method       | Condition                   | Description           |
+| ------------ | --------------------------- | --------------------- |
+| `rule_based` | avg_conf >= 0.7             | Regex + keywords      |
+| `llm`        | force_llm or avg_conf < 0.7 | LLM generation        |
+| `hybrid`     | Default                     | Rule + LLM validation |
 
-Innopolis University, 2026
+---
+
+## Troubleshooting
+
+### LLM not responding
+
+```bash
+curl http://localhost:11434/api/tags
+ollama serve
+```
+
+### OCR quality issues
+
+- Check input image quality
+- Ensure TrOCR model loaded: `make logs | grep TrOCR`
+- Try increasing `max_image_dimension`
+
+## Authors
+
+- **Ayomide and Martin**
