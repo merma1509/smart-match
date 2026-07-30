@@ -1,17 +1,0 @@
-/opt/homebrew/Caskroom/miniforge/base/envs/ai_sec/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.4.4) doesn't match a supported version!
-  warnings.warn(
-2026-07-28 20:27:01.635 | INFO     | __main__:<module>:195 - ============================================================
-2026-07-28 20:27:01.635 | INFO     | __main__:<module>:195 - RESUMING TrOCR FINE-TUNE
-2026-07-28 20:27:01.635 | INFO     | __main__:<module>:196 -   Epochs: 3, Mode: light, Batch: 16, LR: 5e-05
-2026-07-28 20:27:01.635 | INFO     | __main__:<module>:197 - ============================================================
-2026-07-28 20:27:01.636 | INFO     | __main__:train:51 - Loading data from /Users/mnijonshuti/smart-match/finetune_data
-2026-07-28 20:27:01.782 | INFO     | __main__:train:57 - Train: 45000, Val: 5000
-2026-07-28 20:27:01.857 | INFO     | __main__:train:62 - Loading processor from base model: taiga75/ru-trocr-1700s
-Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
-2026-07-28 20:27:06.254 | INFO     | __main__:train:66 - Loading model weights from checkpoint: /Users/mnijonshuti/smart-match/app/models/ocr/fine_tuned_trocr
-2026-07-28 20:27:20.634 | INFO     | __main__:train:79 - Light mode: encoder frozen, decoder=247.3M params
-2026-07-28 20:27:21.258 | INFO     | __main__:train:109 - Training: 3 more epochs, 8439 steps, lr=5e-05
-2026-07-28 20:27:21.262 | INFO     | __main__:train:118 - Previous best val loss: 0.4348646121621132
-Epoch 1:   0%|          | 0/2813 [00:00<?, ?it/s]`loss_type=None` was set in the config but it is unrecognised.Using the default loss: `ForCausalLMLoss`.
-Epoch 1:   0%|          | 0/2813 [04:50<?, ?it/s, loss=10.5387]Epoch 1:   0%|          | 1/2813 [04:50<226:48:37, 290.37s/it, loss=10.5387]/opt/homebrew/Caskroom/miniforge/base/envs/ai_sec/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
-  warnings.warn('resource_tracker: There appear to be %d '

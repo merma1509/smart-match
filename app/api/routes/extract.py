@@ -12,12 +12,14 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.core.config import settings
+from app.schemas.responses import BatchExtractionResponse, SingleExtractionResponse
 from app.services.entity_resolution import resolve_entities
 from app.services.extraction import extract_information
 from app.services.layout import analyze_layout
 from app.services.light_preprocess import light_preprocess
 from app.services.ocr import recognize_text
 from app.services.postprocessing import postprocess_ocr_text
+from app.services.region_preprocess import preprocess_region
 
 router = APIRouter()
 
@@ -35,6 +37,28 @@ def validate_file(file: UploadFile):
         raise HTTPException(
             400, f"File too large ({file.size} bytes). Max: {settings.max_file_size_mb}MB"
         )
+
+
+def _determine_region_type(elem: dict) -> str:
+    """Determine the preprocessing type for a layout element."""
+    elem_type = elem["type"]
+    props = elem.get("properties", {})
+
+    # For data_cell, use the region_type property (handwritten vs printed)
+    if elem_type == "data_cell":
+        cell_type = props.get("region_type", "printed")
+        if cell_type == "handwritten":
+            return "handwritten"
+        return "data_cell"
+
+    # Map layout element types to preprocessing types
+    type_map = {
+        "text_block": "printed_text",
+        "header_row": "printed_text",
+        "record_block": "table_cell",
+        "data_row": "table_cell",
+    }
+    return type_map.get(elem_type, "printed_text")
 
 
 def _process_single_image(image_path: Path, file_name: str, request_id: str) -> dict:
@@ -62,7 +86,7 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
     layout = analyze_layout(preprocessed, gray_raw=gray_raw)
     logger.info(f"[{request_id}] Layout: {layout['page_type']}, {len(layout['elements'])} elements")
 
-    # 3. OCR on text regions
+    # 3. OCR on text regions with region-specific preprocessing
     texts = []
     for elem in layout["elements"]:
         if elem["type"] in ("data_cell", "text_block", "header_row", "record_block"):
@@ -70,7 +94,12 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
             crop = preprocessed[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
-            result = recognize_text(crop)
+
+            # Apply region-specific preprocessing before OCR
+            region_type = _determine_region_type(elem)
+            preprocessed_crop = preprocess_region(crop, region_type)
+
+            result = recognize_text(preprocessed_crop)
             if result["text"].strip():
                 texts.append(result["text"])
 
@@ -87,9 +116,9 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
     # 6. Entity resolution (normalize names, resolve dates, compute age)
     resolved = resolve_entities(extracted)
 
-    # 7. Build result
+    # 7. Build result — validate with Pydantic schema
     elapsed = round(time.time() - start_time, 2)
-    result = {
+    result_dict = {
         "request_id": request_id,
         "file": file_name,
         "processing_time_seconds": elapsed,
@@ -103,21 +132,24 @@ def _process_single_image(image_path: Path, file_name: str, request_id: str) -> 
         "needs_review": extracted.get("needs_review", True),
     }
 
+    # Validate against Pydantic schema
+    SingleExtractionResponse(**result_dict)
+
     # 8. Save result
     result_path = RESULTS_DIR / f"{request_id}.json"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(result_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+        json.dump(result_dict, f, indent=2, ensure_ascii=False)
 
     logger.info(
         f"[{request_id}] Done in {elapsed}s | "
         f"type={extracted.get('record_type', '?')} | "
         f"review={extracted.get('needs_review', True)}"
     )
-    return result
+    return result_dict
 
 
-@router.post("/extract")
+@router.post("/extract", response_model=None)
 async def extract(file: UploadFile = File(...)):
     """Extract structured genealogical data from a scanned metrical book page."""
     validate_file(file)
@@ -145,7 +177,7 @@ async def extract(file: UploadFile = File(...)):
         raise HTTPException(500, f"Processing failed: {str(e)}")
 
 
-@router.post("/extract/batch")
+@router.post("/extract/batch", response_model=None)
 async def extract_batch(files: list[UploadFile] = File(...)):
     """Extract from multiple images in one request.
 
@@ -202,20 +234,22 @@ async def extract_batch(files: list[UploadFile] = File(...)):
             }
         )
 
-        return {
-            "total": len(results) + len(errors),
-            "success": len(results),
-            "failed": len(errors),
-            "rollback": True,
-            "results": results,
-            "errors": errors,
-        }
+        batch_response = BatchExtractionResponse(
+            total=len(results) + len(errors),
+            success=len(results),
+            failed=len(errors),
+            rollback=True,
+            results=results,
+            errors=errors,
+        )
+        return batch_response.model_dump()
 
-    return {
-        "total": len(results) + len(errors),
-        "success": len(results),
-        "failed": len(errors),
-        "rollback": False,
-        "results": results,
-        "errors": errors,
-    }
+    batch_response = BatchExtractionResponse(
+        total=len(results) + len(errors),
+        success=len(results),
+        failed=len(errors),
+        rollback=False,
+        results=results,
+        errors=errors,
+    )
+    return batch_response.model_dump()

@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from app.core.config import settings
+from app.schemas.responses import HealthResponse, RootResponse
 
 router = APIRouter()
 
@@ -13,25 +14,25 @@ UPLOAD_DIR = Path(settings.upload_dir)
 RESULTS_DIR = Path(settings.output_dir)
 
 
-@router.get("/")
+@router.get("/", response_model=RootResponse)
 def root():
-    return {
-        "service": settings.app_name,
-        "version": settings.app_version,
-        "status": "running",
-        "endpoints": {
+    return RootResponse(
+        service=settings.app_name,
+        version=settings.app_version,
+        status="running",
+        endpoints={
             "GET /": "This info",
             "GET /health": "Health check",
             "POST /extract": "Extract genealogical data from image",
             "POST /extract/batch": "Extract from multiple images",
-            "GET /results": "List all results",
+            "GET /results/": "List all results",
             "GET /results/{id}": "Get result by ID",
             "DELETE /results/{id}": "Delete a result",
         },
-    }
+    )
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthResponse)
 def health():
     """Deep health check — verifies service and directories."""
     issues = []
@@ -49,9 +50,9 @@ def health():
     if issues:
         status = "degraded"
 
-    return {
-        "status": status,
-        "service": settings.app_name,
-        "version": settings.app_version,
-        "issues": issues if issues else None,
-    }
+    return HealthResponse(
+        status=status,
+        service=settings.app_name,
+        version=settings.app_version,
+        issues=issues if issues else None,
+    )
